@@ -2,8 +2,13 @@
 #include <string>
 #include <limits>
 #include <sstream>
+#include <fstream>
 
 using namespace std;
+
+// Константы для идентификации объектов в файле
+const string PIPE_IDENTIFIER = "[PIPE]";
+const string STATION_IDENTIFIER = "[STATION]";
 
 struct Pipe {
     string name = "";
@@ -31,16 +36,13 @@ T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_
 
         stringstream ss(input);
 
-        // Пытаемся прочитать число
         if (ss >> value) {
-            // Проверяем, что после числа нет других символов
             char remaining;
             if (ss >> remaining) {
                 cout << "Invalid input! Please enter only a number without extra characters.\n";
                 continue;
             }
 
-            // Проверяем диапазон
             if (value < minValue || value > maxValue) {
                 cout << "Invalid input! Please enter a number between " << minValue << " and " << maxValue << ".\n";
                 continue;
@@ -54,19 +56,184 @@ T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_
     }
 }
 
+// Функция для подтверждения действия
+bool getConfirmation(const string& message) {
+    string input;
+    while (true) {
+        cout << message << " (y/n): ";
+        getline(cin, input);
+
+        if (input == "y" || input == "Y") {
+            return true;
+        }
+        else if (input == "n" || input == "N") {
+            return false;
+        }
+        else {
+            cout << "Invalid input! Please enter 'y' or 'n'.\n";
+        }
+    }
+}
+
+// Функция сохранения данных
+void saveData(const Pipe& pipe, const CompressorStation& station, bool pipeExists, bool stationExists) {
+    string filename;
+    cout << "Enter filename to save (without extension): ";
+    getline(cin, filename);
+    filename += ".txt";
+
+    // Проверка существования файла
+    ifstream testFile(filename);
+    if (testFile.good()) {
+        testFile.close();
+        if (!getConfirmation("File already exists. Overwrite?")) {
+            cout << "Save cancelled.\n";
+            return;
+        }
+    }
+
+    ofstream outFile(filename);
+    if (!outFile) {
+        cout << "Error: Could not create file " << filename << endl;
+        return;
+    }
+
+    // Сохранение трубы
+    if (pipeExists) {
+        outFile << PIPE_IDENTIFIER << endl;
+        outFile << pipe.name << endl;
+        outFile << pipe.length << endl;
+        outFile << pipe.diameter << endl;
+        outFile << pipe.underRepair << endl;
+    }
+
+    // Сохранение станции
+    if (stationExists) {
+        outFile << STATION_IDENTIFIER << endl;
+        outFile << station.name << endl;
+        outFile << station.totalWorkshops << endl;
+        outFile << station.activeWorkshops << endl;
+        outFile << station.stationClass << endl;
+    }
+
+    outFile.close();
+    cout << "Data successfully saved to " << filename << endl;
+}
+
+// Функция загрузки данных
+void loadData(Pipe& pipe, CompressorStation& station, bool& pipeExists, bool& stationExists) {
+    string filename;
+    cout << "Enter filename to load (without extension): ";
+    getline(cin, filename);
+    filename += ".txt";
+
+    ifstream inFile(filename);
+    if (!inFile) {
+        cout << "Error: Could not open file " << filename << endl;
+        return;
+    }
+
+    // Проверка на перезапись существующих данных
+    if (pipeExists || stationExists) {
+        if (!getConfirmation("Current data will be overwritten. Continue?")) {
+            cout << "Load cancelled.\n";
+            inFile.close();
+            return;
+        }
+    }
+
+    string line;
+    Pipe tempPipe;
+    CompressorStation tempStation;
+    bool loadingPipe = false;
+    bool loadingStation = false;
+    int lineCount = 0;
+
+    while (getline(inFile, line)) {
+        if (line == PIPE_IDENTIFIER) {
+            loadingPipe = true;
+            loadingStation = false;
+            lineCount = 0;
+            continue;
+        }
+        else if (line == STATION_IDENTIFIER) {
+            loadingStation = true;
+            loadingPipe = false;
+            lineCount = 0;
+            continue;
+        }
+
+        if (loadingPipe) {
+            switch (lineCount) {
+            case 0: tempPipe.name = line; break;
+            case 1: tempPipe.length = stoi(line); break;
+            case 2: tempPipe.diameter = stoi(line); break;
+            case 3: tempPipe.underRepair = (line == "1"); break;
+            }
+            lineCount++;
+            if (lineCount == 4) {
+                pipe = tempPipe;
+                pipeExists = true;
+                loadingPipe = false;
+            }
+        }
+        else if (loadingStation) {
+            switch (lineCount) {
+            case 0: tempStation.name = line; break;
+            case 1: tempStation.totalWorkshops = stoul(line); break;
+            case 2: tempStation.activeWorkshops = stoul(line); break;
+            case 3: tempStation.stationClass = stoi(line); break;
+            }
+            lineCount++;
+            if (lineCount == 4) {
+                station = tempStation;
+                stationExists = true;
+                loadingStation = false;
+            }
+        }
+    }
+
+    inFile.close();
+    cout << "Data successfully loaded from " << filename << endl;
+}
+
+// Функция отображения всех объектов
+void viewAllObjects(const Pipe& pipe, const CompressorStation& station, bool pipeExists, bool stationExists) {
+    if (pipeExists) {
+        cout << "\nPipe: " << pipe.name
+            << "\nLength: " << pipe.length << " km"
+            << "\nDiameter: " << pipe.diameter << " mm"
+            << "\nUnder repair: " << (pipe.underRepair ? "Yes" : "No") << "\n";
+    }
+    else {
+        cout << "No pipe added yet.\n";
+    }
+
+    if (stationExists) {
+        cout << "\nCompressor Station: " << station.name
+            << "\nTotal workshops: " << station.totalWorkshops
+            << "\nActive workshops: " << station.activeWorkshops
+            << "\nStation class: " << station.stationClass << "\n";
+    }
+    else {
+        cout << "No station added yet.\n";
+    }
+}
+
 int main() {
     Pipe myPipe;
     CompressorStation myStation;
     bool pipeAdded = false;
     bool stationAdded = false;
     int choice = -1;
-    char confirm;
 
     while (true) {
         cout << "\nMain Menu:\n"
             << "1. Add Pipe\n"
             << "2. Add Compressor Station\n"
             << "3. View All Objects\n"
+            << "4. Save Data\n"
+            << "5. Load Data\n"
             << "0. Exit\n"
             << "Choose action: ";
 
@@ -79,93 +246,67 @@ int main() {
             continue;
         }
 
-        // Проверяем, что после числа нет других символов
         char remaining;
         if (ss >> remaining) {
             cout << "Invalid input! Please enter only a number without extra characters.\n";
             continue;
         }
 
-        if (choice == 1) {
+        switch (choice) {
+        case 1: {
             if (pipeAdded) {
-                cout << "Pipe already exists. Overwrite? (y/n): ";
-                getline(cin, input);
-                if (input != "y" && input != "Y") {
-                    continue;
+                if (!getConfirmation("Pipe already exists. Overwrite?")) {
+                    break;
                 }
             }
 
             cout << "Enter pipe name: ";
             getline(cin, myPipe.name);
 
-            // Валидация длины трубы
             myPipe.length = getValidatedNumber<int>("Enter length (km, must be positive): ", 1);
-
-            // Валидация диаметра трубы
             myPipe.diameter = getValidatedNumber<int>("Enter diameter (mm, must be positive): ", 1);
-
             myPipe.underRepair = false;
             pipeAdded = true;
             cout << "Pipe added successfully!\n";
-
+            break;
         }
-        else if (choice == 2) {
+
+        case 2: {
             if (stationAdded) {
-                cout << "Station already exists. Overwrite? (y/n): ";
-                getline(cin, input);
-                if (input != "y" && input != "Y") {
-                    continue;
+                if (!getConfirmation("Station already exists. Overwrite?")) {
+                    break;
                 }
             }
 
             cout << "Enter station name: ";
             getline(cin, myStation.name);
 
-            // Валидация общего количества цехов
             myStation.totalWorkshops = getValidatedNumber<unsigned int>("Enter total workshops: ", 1);
-
-            // Валидация активных цехов (не может быть больше общего количества)
             myStation.activeWorkshops = getValidatedNumber<unsigned int>(
-                "Enter active workshops: ",
-                0,
-                myStation.totalWorkshops
-            );
-
-            // Валидация класса станции
+                "Enter active workshops: ", 0, myStation.totalWorkshops);
             myStation.stationClass = getValidatedNumber<int>("Enter station class: ", 1);
-
             stationAdded = true;
             cout << "Station added successfully!\n";
-
+            break;
         }
-        else if (choice == 3) {
-            if (pipeAdded) {
-                cout << "\nPipe: " << myPipe.name
-                    << "\nLength: " << myPipe.length << " km"
-                    << "\nDiameter: " << myPipe.diameter << " mm"
-                    << "\nUnder repair: " << (myPipe.underRepair ? "Yes" : "No") << "\n";
-            }
-            else {
-                cout << "No pipe added yet.\n";
-            }
 
-            if (stationAdded) {
-                cout << "\nCompressor Station: " << myStation.name
-                    << "\nTotal workshops: " << myStation.totalWorkshops
-                    << "\nActive workshops: " << myStation.activeWorkshops
-                    << "\nStation class: " << myStation.stationClass << "\n";
-            }
-            else {
-                cout << "No station added yet.\n";
-            }
-
-        }
-        else if (choice == 0) {
-            cout << "Exiting program...\n";
+        case 3:
+            viewAllObjects(myPipe, myStation, pipeAdded, stationAdded);
             break;
 
-        }
-        else {
+        case 4:
+            saveData(myPipe, myStation, pipeAdded, stationAdded);
+            break;
+
+        case 5:
+            loadData(myPipe, myStation, pipeAdded, stationAdded);
+            break;
+
+        case 0:
+            cout << "Exiting program...\n";
+            return 0;
+
+        default:
             cout << "Invalid choice! Try again.\n";
         }
     }
