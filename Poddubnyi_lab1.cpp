@@ -1,5 +1,7 @@
 ﻿#include <iostream>
 #include <string>
+#include <limits>
+#include <sstream>
 
 using namespace std;
 
@@ -17,6 +19,41 @@ struct CompressorStation {
     int stationClass = 0;
 };
 
+// Функция для чтения целой строки и проверки, что она содержит только число
+template<typename T>
+T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_limits<T>::max()) {
+    string input;
+    T value;
+
+    while (true) {
+        cout << prompt;
+        getline(cin, input);
+
+        stringstream ss(input);
+
+        // Пытаемся прочитать число
+        if (ss >> value) {
+            // Проверяем, что после числа нет других символов
+            char remaining;
+            if (ss >> remaining) {
+                cout << "Invalid input! Please enter only a number without extra characters.\n";
+                continue;
+            }
+
+            // Проверяем диапазон
+            if (value < minValue || value > maxValue) {
+                cout << "Invalid input! Please enter a number between " << minValue << " and " << maxValue << ".\n";
+                continue;
+            }
+
+            return value;
+        }
+        else {
+            cout << "Invalid input! Please enter a valid number.\n";
+        }
+    }
+}
+
 int main() {
     Pipe myPipe;
     CompressorStation myStation;
@@ -33,26 +70,39 @@ int main() {
             << "0. Exit\n"
             << "Choose action: ";
 
-        cin >> choice;
+        string input;
+        getline(cin, input);
+        stringstream ss(input);
+
+        if (!(ss >> choice)) {
+            cout << "Invalid input! Please enter a number.\n";
+            continue;
+        }
+
+        // Проверяем, что после числа нет других символов
+        char remaining;
+        if (ss >> remaining) {
+            cout << "Invalid input! Please enter only a number without extra characters.\n";
+            continue;
+        }
 
         if (choice == 1) {
             if (pipeAdded) {
                 cout << "Pipe already exists. Overwrite? (y/n): ";
-                cin >> confirm;
-                if (confirm != 'y' && confirm != 'Y') {
+                getline(cin, input);
+                if (input != "y" && input != "Y") {
                     continue;
                 }
             }
 
             cout << "Enter pipe name: ";
-            cin.ignore();
             getline(cin, myPipe.name);
 
-            cout << "Enter length (km): ";
-            cin >> myPipe.length;
+            // Валидация длины трубы
+            myPipe.length = getValidatedNumber<int>("Enter length (km, must be positive): ", 1);
 
-            cout << "Enter diameter (mm): ";
-            cin >> myPipe.diameter;
+            // Валидация диаметра трубы
+            myPipe.diameter = getValidatedNumber<int>("Enter diameter (mm, must be positive): ", 1);
 
             myPipe.underRepair = false;
             pipeAdded = true;
@@ -62,24 +112,27 @@ int main() {
         else if (choice == 2) {
             if (stationAdded) {
                 cout << "Station already exists. Overwrite? (y/n): ";
-                cin >> confirm;
-                if (confirm != 'y' && confirm != 'Y') {
+                getline(cin, input);
+                if (input != "y" && input != "Y") {
                     continue;
                 }
             }
 
             cout << "Enter station name: ";
-            cin.ignore();
             getline(cin, myStation.name);
 
-            cout << "Enter total workshops: ";
-            cin >> myStation.totalWorkshops;
+            // Валидация общего количества цехов
+            myStation.totalWorkshops = getValidatedNumber<unsigned int>("Enter total workshops: ", 1);
 
-            cout << "Enter active workshops: ";
-            cin >> myStation.activeWorkshops;
+            // Валидация активных цехов (не может быть больше общего количества)
+            myStation.activeWorkshops = getValidatedNumber<unsigned int>(
+                "Enter active workshops: ",
+                0,
+                myStation.totalWorkshops
+            );
 
-            cout << "Enter station class: ";
-            cin >> myStation.stationClass;
+            // Валидация класса станции
+            myStation.stationClass = getValidatedNumber<int>("Enter station class: ", 1);
 
             stationAdded = true;
             cout << "Station added successfully!\n";
