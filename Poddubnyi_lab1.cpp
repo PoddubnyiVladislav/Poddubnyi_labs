@@ -6,7 +6,6 @@
 
 using namespace std;
 
-// Константы для идентификации объектов в файле
 const string PIPE_IDENTIFIER = "[PIPE]";
 const string STATION_IDENTIFIER = "[STATION]";
 
@@ -24,7 +23,6 @@ struct CompressorStation {
     int stationClass = 0;
 };
 
-// Функция для чтения целой строки и проверки, что она содержит только число
 template<typename T>
 T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_limits<T>::max()) {
     string input;
@@ -56,7 +54,6 @@ T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_
     }
 }
 
-// Функция для подтверждения действия
 bool getConfirmation(const string& message) {
     string input;
     while (true) {
@@ -75,14 +72,57 @@ bool getConfirmation(const string& message) {
     }
 }
 
-// Функция сохранения данных
+void editPipeStatus(Pipe& pipe, bool pipeExists) {
+    if (!pipeExists) {
+        cout << "No pipe available to edit!\n";
+        return;
+    }
+
+    cout << "Current repair status: " << (pipe.underRepair ? "Under repair" : "Operational") << endl;
+    if (getConfirmation("Change repair status?")) {
+        pipe.underRepair = !pipe.underRepair;
+        cout << "Status changed successfully!\n";
+    }
+}
+
+void editStationWorkshops(CompressorStation& station, bool stationExists) {
+    if (!stationExists) {
+        cout << "No station available to edit!\n";
+        return;
+    }
+
+    cout << "Current workshops: " << station.activeWorkshops << "/" << station.totalWorkshops << " active\n";
+    cout << "1. Start workshop\n2. Stop workshop\nChoose action: ";
+
+    int action = getValidatedNumber("", 1, 2);
+    unsigned int changeAmount = getValidatedNumber<unsigned int>("Enter number of workshops: ", 1);
+
+    if (action == 1) {
+        if (station.activeWorkshops + changeAmount <= station.totalWorkshops) {
+            station.activeWorkshops += changeAmount;
+            cout << changeAmount << " workshop(s) started\n";
+        }
+        else {
+            cout << "Cannot start more than " << station.totalWorkshops - station.activeWorkshops << " workshops\n";
+        }
+    }
+    else {
+        if (changeAmount <= station.activeWorkshops) {
+            station.activeWorkshops -= changeAmount;
+            cout << changeAmount << " workshop(s) stopped\n";
+        }
+        else {
+            cout << "Cannot stop more than " << station.activeWorkshops << " workshops\n";
+        }
+    }
+}
+
 void saveData(const Pipe& pipe, const CompressorStation& station, bool pipeExists, bool stationExists) {
     string filename;
     cout << "Enter filename to save (without extension): ";
     getline(cin, filename);
     filename += ".txt";
 
-    // Проверка существования файла
     ifstream testFile(filename);
     if (testFile.good()) {
         testFile.close();
@@ -98,7 +138,6 @@ void saveData(const Pipe& pipe, const CompressorStation& station, bool pipeExist
         return;
     }
 
-    // Сохранение трубы
     if (pipeExists) {
         outFile << PIPE_IDENTIFIER << endl;
         outFile << pipe.name << endl;
@@ -107,7 +146,6 @@ void saveData(const Pipe& pipe, const CompressorStation& station, bool pipeExist
         outFile << pipe.underRepair << endl;
     }
 
-    // Сохранение станции
     if (stationExists) {
         outFile << STATION_IDENTIFIER << endl;
         outFile << station.name << endl;
@@ -120,7 +158,6 @@ void saveData(const Pipe& pipe, const CompressorStation& station, bool pipeExist
     cout << "Data successfully saved to " << filename << endl;
 }
 
-// Функция загрузки данных
 void loadData(Pipe& pipe, CompressorStation& station, bool& pipeExists, bool& stationExists) {
     string filename;
     cout << "Enter filename to load (without extension): ";
@@ -133,7 +170,6 @@ void loadData(Pipe& pipe, CompressorStation& station, bool& pipeExists, bool& st
         return;
     }
 
-    // Проверка на перезапись существующих данных
     if (pipeExists || stationExists) {
         if (!getConfirmation("Current data will be overwritten. Continue?")) {
             cout << "Load cancelled.\n";
@@ -142,54 +178,34 @@ void loadData(Pipe& pipe, CompressorStation& station, bool& pipeExists, bool& st
         }
     }
 
+    pipeExists = false;
+    stationExists = false;
     string line;
-    Pipe tempPipe;
-    CompressorStation tempStation;
-    bool loadingPipe = false;
-    bool loadingStation = false;
-    int lineCount = 0;
 
     while (getline(inFile, line)) {
         if (line == PIPE_IDENTIFIER) {
-            loadingPipe = true;
-            loadingStation = false;
-            lineCount = 0;
-            continue;
+            getline(inFile, pipe.name);
+            string lengthStr, diameterStr, repairStr;
+            getline(inFile, lengthStr);
+            getline(inFile, diameterStr);
+            getline(inFile, repairStr);
+
+            pipe.length = stoi(lengthStr);
+            pipe.diameter = stoi(diameterStr);
+            pipe.underRepair = (repairStr == "1");
+            pipeExists = true;
         }
         else if (line == STATION_IDENTIFIER) {
-            loadingStation = true;
-            loadingPipe = false;
-            lineCount = 0;
-            continue;
-        }
+            getline(inFile, station.name);
+            string totalStr, activeStr, classStr;
+            getline(inFile, totalStr);
+            getline(inFile, activeStr);
+            getline(inFile, classStr);
 
-        if (loadingPipe) {
-            switch (lineCount) {
-            case 0: tempPipe.name = line; break;
-            case 1: tempPipe.length = stoi(line); break;
-            case 2: tempPipe.diameter = stoi(line); break;
-            case 3: tempPipe.underRepair = (line == "1"); break;
-            }
-            lineCount++;
-            if (lineCount == 4) {
-                pipe = tempPipe;
-                pipeExists = true;
-                loadingPipe = false;
-            }
-        }
-        else if (loadingStation) {
-            switch (lineCount) {
-            case 0: tempStation.name = line; break;
-            case 1: tempStation.totalWorkshops = stoul(line); break;
-            case 2: tempStation.activeWorkshops = stoul(line); break;
-            case 3: tempStation.stationClass = stoi(line); break;
-            }
-            lineCount++;
-            if (lineCount == 4) {
-                station = tempStation;
-                stationExists = true;
-                loadingStation = false;
-            }
+            station.totalWorkshops = stoul(totalStr);
+            station.activeWorkshops = stoul(activeStr);
+            station.stationClass = stoi(classStr);
+            stationExists = true;
         }
     }
 
@@ -197,7 +213,6 @@ void loadData(Pipe& pipe, CompressorStation& station, bool& pipeExists, bool& st
     cout << "Data successfully loaded from " << filename << endl;
 }
 
-// Функция отображения всех объектов
 void viewAllObjects(const Pipe& pipe, const CompressorStation& station, bool pipeExists, bool stationExists) {
     if (pipeExists) {
         cout << "\nPipe: " << pipe.name
@@ -232,8 +247,10 @@ int main() {
             << "1. Add Pipe\n"
             << "2. Add Compressor Station\n"
             << "3. View All Objects\n"
-            << "4. Save Data\n"
-            << "5. Load Data\n"
+            << "4. Edit Pipe Status\n"
+            << "5. Edit Station Workshops\n"
+            << "6. Save Data\n"
+            << "7. Load Data\n"
             << "0. Exit\n"
             << "Choose action: ";
 
@@ -254,15 +271,12 @@ int main() {
 
         switch (choice) {
         case 1: {
-            if (pipeAdded) {
-                if (!getConfirmation("Pipe already exists. Overwrite?")) {
-                    break;
-                }
+            if (pipeAdded && !getConfirmation("Pipe already exists. Overwrite?")) {
+                break;
             }
 
             cout << "Enter pipe name: ";
             getline(cin, myPipe.name);
-
             myPipe.length = getValidatedNumber<int>("Enter length (km, must be positive): ", 1);
             myPipe.diameter = getValidatedNumber<int>("Enter diameter (mm, must be positive): ", 1);
             myPipe.underRepair = false;
@@ -272,15 +286,12 @@ int main() {
         }
 
         case 2: {
-            if (stationAdded) {
-                if (!getConfirmation("Station already exists. Overwrite?")) {
-                    break;
-                }
+            if (stationAdded && !getConfirmation("Station already exists. Overwrite?")) {
+                break;
             }
 
             cout << "Enter station name: ";
             getline(cin, myStation.name);
-
             myStation.totalWorkshops = getValidatedNumber<unsigned int>("Enter total workshops: ", 1);
             myStation.activeWorkshops = getValidatedNumber<unsigned int>(
                 "Enter active workshops: ", 0, myStation.totalWorkshops);
@@ -295,10 +306,18 @@ int main() {
             break;
 
         case 4:
-            saveData(myPipe, myStation, pipeAdded, stationAdded);
+            editPipeStatus(myPipe, pipeAdded);
             break;
 
         case 5:
+            editStationWorkshops(myStation, stationAdded);
+            break;
+
+        case 6:
+            saveData(myPipe, myStation, pipeAdded, stationAdded);
+            break;
+
+        case 7:
             loadData(myPipe, myStation, pipeAdded, stationAdded);
             break;
 
