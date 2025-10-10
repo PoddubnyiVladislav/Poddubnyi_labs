@@ -5,6 +5,7 @@
 #include <fstream>
 #include <vector>
 #include <algorithm>
+#include <unordered_set>
 
 using namespace std;
 
@@ -29,8 +30,29 @@ struct CompressorStation {
 
 vector<Pipe> pipes;
 vector<CompressorStation> stations;
+unordered_set<int> usedPipeIds;
+unordered_set<int> usedStationIds;
 int nextPipeId = 1;
 int nextStationId = 1;
+
+// Функция для генерации уникального ID
+int generateUniqueId(unordered_set<int>& usedIds, int& nextId) {
+    // Ищем первое свободное ID, начиная с nextId
+    while (usedIds.find(nextId) != usedIds.end()) {
+        nextId++;
+    }
+    int newId = nextId;
+    usedIds.insert(newId);
+    nextId++;
+    return newId;
+}
+
+// Функция для освобождения ID при удалении объекта
+void releaseId(unordered_set<int>& usedIds, int id) {
+    usedIds.erase(id);
+    // Можно обновить nextId если удаленный ID был меньше текущего nextId
+    // Но для простоты оставим как есть - nextId всегда увеличивается
+}
 
 template<typename T>
 T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_limits<T>::max()) {
@@ -132,7 +154,7 @@ void displayAllStations() {
 
 void addPipe() {
     Pipe newPipe;
-    newPipe.id = nextPipeId++;
+    newPipe.id = generateUniqueId(usedPipeIds, nextPipeId);
     
     cout << "Enter pipe name: ";
     getline(cin, newPipe.name);
@@ -146,7 +168,7 @@ void addPipe() {
 
 void addStation() {
     CompressorStation newStation;
-    newStation.id = nextStationId++;
+    newStation.id = generateUniqueId(usedStationIds, nextStationId);
     
     cout << "Enter station name: ";
     getline(cin, newStation.name);
@@ -242,6 +264,7 @@ void deletePipe() {
 
     cout << "You are about to delete pipe: " << pipes[pipeIndex].name << " (ID: " << pipeId << ")\n";
     if (getConfirmation("Are you sure?")) {
+        releaseId(usedPipeIds, pipeId);
         pipes.erase(pipes.begin() + pipeIndex);
         cout << "Pipe deleted successfully!\n";
     }
@@ -264,6 +287,7 @@ void deleteStation() {
 
     cout << "You are about to delete station: " << stations[stationIndex].name << " (ID: " << stationId << ")\n";
     if (getConfirmation("Are you sure?")) {
+        releaseId(usedStationIds, stationId);
         stations.erase(stations.begin() + stationIndex);
         cout << "Station deleted successfully!\n";
     }
@@ -290,9 +314,23 @@ void saveData() {
         return;
     }
 
-    // Сохраняем следующее ID для восстановления
+    // Сохраняем следующее ID и использованные ID для восстановления уникальности
     outFile << "[NEXT_PIPE_ID]" << endl << nextPipeId << endl;
     outFile << "[NEXT_STATION_ID]" << endl << nextStationId << endl;
+    
+    // Сохраняем использованные ID труб
+    outFile << "[USED_PIPE_IDS]" << endl;
+    for (int id : usedPipeIds) {
+        outFile << id << " ";
+    }
+    outFile << endl;
+    
+    // Сохраняем использованные ID станций
+    outFile << "[USED_STATION_IDS]" << endl;
+    for (int id : usedStationIds) {
+        outFile << id << " ";
+    }
+    outFile << endl;
 
     for (const auto& pipe : pipes) {
         outFile << PIPE_IDENTIFIER << endl;
@@ -337,9 +375,15 @@ void loadData() {
         }
     }
 
+    // Очищаем текущие данные
     pipes.clear();
     stations.clear();
+    usedPipeIds.clear();
+    usedStationIds.clear();
+    
     string line;
+    bool readingUsedPipeIds = false;
+    bool readingUsedStationIds = false;
 
     while (getline(inFile, line)) {
         if (line == "[NEXT_PIPE_ID]") {
@@ -351,6 +395,24 @@ void loadData() {
             string idStr;
             getline(inFile, idStr);
             nextStationId = stoi(idStr);
+        }
+        else if (line == "[USED_PIPE_IDS]") {
+            string idsStr;
+            getline(inFile, idsStr);
+            stringstream ss(idsStr);
+            int id;
+            while (ss >> id) {
+                usedPipeIds.insert(id);
+            }
+        }
+        else if (line == "[USED_STATION_IDS]") {
+            string idsStr;
+            getline(inFile, idsStr);
+            stringstream ss(idsStr);
+            int id;
+            while (ss >> id) {
+                usedStationIds.insert(id);
+            }
         }
         else if (line == PIPE_IDENTIFIER) {
             Pipe pipe;
@@ -389,6 +451,7 @@ void loadData() {
     inFile.close();
     cout << "Data successfully loaded from " << filename << endl;
     cout << "Loaded: " << pipes.size() << " pipes, " << stations.size() << " stations\n";
+    cout << "Next available IDs - Pipe: " << nextPipeId << ", Station: " << nextStationId << endl;
 }
 
 void viewAllObjects() {
