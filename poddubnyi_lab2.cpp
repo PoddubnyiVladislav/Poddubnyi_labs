@@ -6,6 +6,7 @@
 #include <vector>
 #include <algorithm>
 #include <unordered_set>
+#include <cctype>
 
 using namespace std;
 
@@ -35,9 +36,15 @@ unordered_set<int> usedStationIds;
 int nextPipeId = 1;
 int nextStationId = 1;
 
+// Функция для преобразования строки к нижнему регистру (для поиска без учета регистра)
+string toLower(const string& str) {
+    string result = str;
+    transform(result.begin(), result.end(), result.begin(), ::tolower);
+    return result;
+}
+
 // Функция для генерации уникального ID
 int generateUniqueId(unordered_set<int>& usedIds, int& nextId) {
-    // Ищем первое свободное ID, начиная с nextId
     while (usedIds.find(nextId) != usedIds.end()) {
         nextId++;
     }
@@ -50,14 +57,42 @@ int generateUniqueId(unordered_set<int>& usedIds, int& nextId) {
 // Функция для освобождения ID при удалении объекта
 void releaseId(unordered_set<int>& usedIds, int id) {
     usedIds.erase(id);
-    // Можно обновить nextId если удаленный ID был меньше текущего nextId
-    // Но для простоты оставим как есть - nextId всегда увеличивается
 }
 
 template<typename T>
 T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_limits<T>::max()) {
     string input;
     T value;
+
+    while (true) {
+        cout << prompt;
+        getline(cin, input);
+
+        stringstream ss(input);
+
+        if (ss >> value) {
+            char remaining;
+            if (ss >> remaining) {
+                cout << "Invalid input! Please enter only a number without extra characters.\n";
+                continue;
+            }
+
+            if (value < minValue || value > maxValue) {
+                cout << "Invalid input! Please enter a number between " << minValue << " and " << maxValue << ".\n";
+                continue;
+            }
+
+            return value;
+        }
+        else {
+            cout << "Invalid input! Please enter a valid number.\n";
+        }
+    }
+}
+
+double getValidatedDouble(const string& prompt, double minValue = 0.0, double maxValue = 100.0) {
+    string input;
+    double value;
 
     while (true) {
         cout << prompt;
@@ -149,6 +184,209 @@ void displayAllStations() {
             << " | Name: " << station.name
             << " | Workshops: " << station.activeWorkshops << "/" << station.totalWorkshops
             << " | Class: " << station.stationClass << "\n";
+    }
+}
+
+// Функции поиска труб
+void searchPipesByName() {
+    if (pipes.empty()) {
+        cout << "No pipes available to search!\n";
+        return;
+    }
+
+    string searchName;
+    cout << "Enter pipe name to search for: ";
+    getline(cin, searchName);
+    
+    string searchNameLower = toLower(searchName);
+    vector<Pipe> foundPipes;
+    
+    for (const auto& pipe : pipes) {
+        if (toLower(pipe.name).find(searchNameLower) != string::npos) {
+            foundPipes.push_back(pipe);
+        }
+    }
+    
+    if (foundPipes.empty()) {
+        cout << "No pipes found with name containing: " << searchName << "\n";
+        return;
+    }
+    
+    cout << "\n=== FOUND PIPES ===\n";
+    for (const auto& pipe : foundPipes) {
+        cout << "ID: " << pipe.id
+            << " | Name: " << pipe.name
+            << " | Length: " << pipe.length << " km"
+            << " | Diameter: " << pipe.diameter << " mm"
+            << " | Under repair: " << (pipe.underRepair ? "Yes" : "No") << "\n";
+    }
+    cout << "Total found: " << foundPipes.size() << " pipe(s)\n";
+}
+
+void searchPipesByRepairStatus() {
+    if (pipes.empty()) {
+        cout << "No pipes available to search!\n";
+        return;
+    }
+
+    cout << "Search for pipes:\n";
+    cout << "1. Under repair\n";
+    cout << "2. Operational\n";
+    int choice = getValidatedNumber("Choose status: ", 1, 2);
+    
+    bool searchStatus = (choice == 1);
+    vector<Pipe> foundPipes;
+    
+    for (const auto& pipe : pipes) {
+        if (pipe.underRepair == searchStatus) {
+            foundPipes.push_back(pipe);
+        }
+    }
+    
+    if (foundPipes.empty()) {
+        cout << "No pipes found with the selected status.\n";
+        return;
+    }
+    
+    cout << "\n=== FOUND PIPES ===\n";
+    for (const auto& pipe : foundPipes) {
+        cout << "ID: " << pipe.id
+            << " | Name: " << pipe.name
+            << " | Length: " << pipe.length << " km"
+            << " | Diameter: " << pipe.diameter << " mm"
+            << " | Under repair: " << (pipe.underRepair ? "Yes" : "No") << "\n";
+    }
+    cout << "Total found: " << foundPipes.size() << " pipe(s)\n";
+}
+
+void searchPipesMenu() {
+    if (pipes.empty()) {
+        cout << "No pipes available to search!\n";
+        return;
+    }
+
+    cout << "\n=== PIPE SEARCH ===\n";
+    cout << "1. Search by name\n";
+    cout << "2. Search by repair status\n";
+    cout << "0. Back to main menu\n";
+    
+    int choice = getValidatedNumber("Choose search type: ", 0, 2);
+    
+    switch (choice) {
+        case 1:
+            searchPipesByName();
+            break;
+        case 2:
+            searchPipesByRepairStatus();
+            break;
+        case 0:
+            return;
+    }
+}
+
+// Функции поиска КС
+void searchStationsByName() {
+    if (stations.empty()) {
+        cout << "No stations available to search!\n";
+        return;
+    }
+
+    string searchName;
+    cout << "Enter station name to search for: ";
+    getline(cin, searchName);
+    
+    string searchNameLower = toLower(searchName);
+    vector<CompressorStation> foundStations;
+    
+    for (const auto& station : stations) {
+        if (toLower(station.name).find(searchNameLower) != string::npos) {
+            foundStations.push_back(station);
+        }
+    }
+    
+    if (foundStations.empty()) {
+        cout << "No stations found with name containing: " << searchName << "\n";
+        return;
+    }
+    
+    cout << "\n=== FOUND STATIONS ===\n";
+    for (const auto& station : foundStations) {
+        double unusedPercentage = 0.0;
+        if (station.totalWorkshops > 0) {
+            unusedPercentage = (1.0 - (double)station.activeWorkshops / station.totalWorkshops) * 100.0;
+        }
+        
+        cout << "ID: " << station.id
+            << " | Name: " << station.name
+            << " | Workshops: " << station.activeWorkshops << "/" << station.totalWorkshops
+            << " | Unused: " << unusedPercentage << "%"
+            << " | Class: " << station.stationClass << "\n";
+    }
+    cout << "Total found: " << foundStations.size() << " station(s)\n";
+}
+
+void searchStationsByUnusedPercentage() {
+    if (stations.empty()) {
+        cout << "No stations available to search!\n";
+        return;
+    }
+
+    cout << "Search stations by percentage of unused workshops (0-100%)\n";
+    double minPercentage = getValidatedDouble("Enter minimum percentage: ", 0.0, 100.0);
+    double maxPercentage = getValidatedDouble("Enter maximum percentage: ", minPercentage, 100.0);
+    
+    vector<CompressorStation> foundStations;
+    
+    for (const auto& station : stations) {
+        if (station.totalWorkshops > 0) {
+            double unusedPercentage = (1.0 - (double)station.activeWorkshops / station.totalWorkshops) * 100.0;
+            if (unusedPercentage >= minPercentage && unusedPercentage <= maxPercentage) {
+                foundStations.push_back(station);
+            }
+        }
+    }
+    
+    if (foundStations.empty()) {
+        cout << "No stations found with unused workshops percentage between " 
+             << minPercentage << "% and " << maxPercentage << "%\n";
+        return;
+    }
+    
+    cout << "\n=== FOUND STATIONS ===\n";
+    for (const auto& station : foundStations) {
+        double unusedPercentage = (1.0 - (double)station.activeWorkshops / station.totalWorkshops) * 100.0;
+        
+        cout << "ID: " << station.id
+            << " | Name: " << station.name
+            << " | Workshops: " << station.activeWorkshops << "/" << station.totalWorkshops
+            << " | Unused: " << unusedPercentage << "%"
+            << " | Class: " << station.stationClass << "\n";
+    }
+    cout << "Total found: " << foundStations.size() << " station(s)\n";
+}
+
+void searchStationsMenu() {
+    if (stations.empty()) {
+        cout << "No stations available to search!\n";
+        return;
+    }
+
+    cout << "\n=== STATION SEARCH ===\n";
+    cout << "1. Search by name\n";
+    cout << "2. Search by percentage of unused workshops\n";
+    cout << "0. Back to main menu\n";
+    
+    int choice = getValidatedNumber("Choose search type: ", 0, 2);
+    
+    switch (choice) {
+        case 1:
+            searchStationsByName();
+            break;
+        case 2:
+            searchStationsByUnusedPercentage();
+            break;
+        case 0:
+            return;
     }
 }
 
@@ -314,18 +552,15 @@ void saveData() {
         return;
     }
 
-    // Сохраняем следующее ID и использованные ID для восстановления уникальности
     outFile << "[NEXT_PIPE_ID]" << endl << nextPipeId << endl;
     outFile << "[NEXT_STATION_ID]" << endl << nextStationId << endl;
     
-    // Сохраняем использованные ID труб
     outFile << "[USED_PIPE_IDS]" << endl;
     for (int id : usedPipeIds) {
         outFile << id << " ";
     }
     outFile << endl;
     
-    // Сохраняем использованные ID станций
     outFile << "[USED_STATION_IDS]" << endl;
     for (int id : usedStationIds) {
         outFile << id << " ";
@@ -375,7 +610,6 @@ void loadData() {
         }
     }
 
-    // Очищаем текущие данные
     pipes.clear();
     stations.clear();
     usedPipeIds.clear();
@@ -472,8 +706,10 @@ int main() {
             << "5. Edit Station Workshops\n"
             << "6. Delete Pipe\n"
             << "7. Delete Station\n"
-            << "8. Save Data\n"
-            << "9. Load Data\n"
+            << "8. Search Pipes\n"
+            << "9. Search Stations\n"
+            << "10. Save Data\n"
+            << "11. Load Data\n"
             << "0. Exit\n"
             << "Choose action: ";
 
@@ -522,10 +758,18 @@ int main() {
             break;
 
         case 8:
-            saveData();
+            searchPipesMenu();
             break;
 
         case 9:
+            searchStationsMenu();
+            break;
+
+        case 10:
+            saveData();
+            break;
+
+        case 11:
             loadData();
             break;
 
