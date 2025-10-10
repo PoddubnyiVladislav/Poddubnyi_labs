@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <cctype>
+#include <set>
 
 using namespace std;
 
@@ -188,6 +189,52 @@ void displayAllStations() {
 }
 
 // Функции поиска труб
+vector<int> findPipesByName(const string& searchName) {
+    vector<int> foundIds;
+    string searchNameLower = toLower(searchName);
+    
+    for (const auto& pipe : pipes) {
+        if (toLower(pipe.name).find(searchNameLower) != string::npos) {
+            foundIds.push_back(pipe.id);
+        }
+    }
+    
+    return foundIds;
+}
+
+vector<int> findPipesByRepairStatus(bool status) {
+    vector<int> foundIds;
+    
+    for (const auto& pipe : pipes) {
+        if (pipe.underRepair == status) {
+            foundIds.push_back(pipe.id);
+        }
+    }
+    
+    return foundIds;
+}
+
+void displayPipesByIds(const vector<int>& pipeIds) {
+    if (pipeIds.empty()) {
+        cout << "No pipes to display.\n";
+        return;
+    }
+
+    cout << "\n=== FOUND PIPES ===\n";
+    for (int id : pipeIds) {
+        int index = findPipeIndexById(id);
+        if (index != -1) {
+            const Pipe& pipe = pipes[index];
+            cout << "ID: " << pipe.id
+                << " | Name: " << pipe.name
+                << " | Length: " << pipe.length << " km"
+                << " | Diameter: " << pipe.diameter << " mm"
+                << " | Under repair: " << (pipe.underRepair ? "Yes" : "No") << "\n";
+        }
+    }
+    cout << "Total found: " << pipeIds.size() << " pipe(s)\n";
+}
+
 void searchPipesByName() {
     if (pipes.empty()) {
         cout << "No pipes available to search!\n";
@@ -198,29 +245,14 @@ void searchPipesByName() {
     cout << "Enter pipe name to search for: ";
     getline(cin, searchName);
     
-    string searchNameLower = toLower(searchName);
-    vector<Pipe> foundPipes;
+    vector<int> foundIds = findPipesByName(searchName);
     
-    for (const auto& pipe : pipes) {
-        if (toLower(pipe.name).find(searchNameLower) != string::npos) {
-            foundPipes.push_back(pipe);
-        }
-    }
-    
-    if (foundPipes.empty()) {
+    if (foundIds.empty()) {
         cout << "No pipes found with name containing: " << searchName << "\n";
         return;
     }
     
-    cout << "\n=== FOUND PIPES ===\n";
-    for (const auto& pipe : foundPipes) {
-        cout << "ID: " << pipe.id
-            << " | Name: " << pipe.name
-            << " | Length: " << pipe.length << " km"
-            << " | Diameter: " << pipe.diameter << " mm"
-            << " | Under repair: " << (pipe.underRepair ? "Yes" : "No") << "\n";
-    }
-    cout << "Total found: " << foundPipes.size() << " pipe(s)\n";
+    displayPipesByIds(foundIds);
 }
 
 void searchPipesByRepairStatus() {
@@ -235,28 +267,142 @@ void searchPipesByRepairStatus() {
     int choice = getValidatedNumber("Choose status: ", 1, 2);
     
     bool searchStatus = (choice == 1);
-    vector<Pipe> foundPipes;
+    vector<int> foundIds = findPipesByRepairStatus(searchStatus);
     
-    for (const auto& pipe : pipes) {
-        if (pipe.underRepair == searchStatus) {
-            foundPipes.push_back(pipe);
-        }
-    }
-    
-    if (foundPipes.empty()) {
+    if (foundIds.empty()) {
         cout << "No pipes found with the selected status.\n";
         return;
     }
     
-    cout << "\n=== FOUND PIPES ===\n";
-    for (const auto& pipe : foundPipes) {
-        cout << "ID: " << pipe.id
-            << " | Name: " << pipe.name
-            << " | Length: " << pipe.length << " km"
-            << " | Diameter: " << pipe.diameter << " mm"
-            << " | Under repair: " << (pipe.underRepair ? "Yes" : "No") << "\n";
+    displayPipesByIds(foundIds);
+}
+
+// Функция для пакетного редактирования труб
+void batchEditPipes() {
+    if (pipes.empty()) {
+        cout << "No pipes available to edit!\n";
+        return;
     }
-    cout << "Total found: " << foundPipes.size() << " pipe(s)\n";
+
+    cout << "\n=== BATCH PIPE EDITING ===\n";
+    cout << "1. Search by name\n";
+    cout << "2. Search by repair status\n";
+    cout << "0. Back to main menu\n";
+    
+    int choice = getValidatedNumber("Choose search type: ", 0, 2);
+    
+    vector<int> foundIds;
+    
+    switch (choice) {
+        case 1: {
+            string searchName;
+            cout << "Enter pipe name to search for: ";
+            getline(cin, searchName);
+            foundIds = findPipesByName(searchName);
+            break;
+        }
+        case 2: {
+            cout << "Search for pipes:\n";
+            cout << "1. Under repair\n";
+            cout << "2. Operational\n";
+            int statusChoice = getValidatedNumber("Choose status: ", 1, 2);
+            foundIds = findPipesByRepairStatus(statusChoice == 1);
+            break;
+        }
+        case 0:
+            return;
+    }
+    
+    if (foundIds.empty()) {
+        cout << "No pipes found with the selected criteria.\n";
+        return;
+    }
+    
+    displayPipesByIds(foundIds);
+    
+    cout << "\nBatch editing options:\n";
+    cout << "1. Edit all found pipes\n";
+    cout << "2. Select specific pipes to edit\n";
+    cout << "0. Cancel\n";
+    
+    int editChoice = getValidatedNumber("Choose editing mode: ", 0, 2);
+    
+    if (editChoice == 0) {
+        return;
+    }
+    
+    vector<int> pipesToEdit;
+    
+    if (editChoice == 1) {
+        // Редактируем все найденные трубы
+        pipesToEdit = foundIds;
+        cout << "Selected all " << foundIds.size() << " pipes for editing.\n";
+    } else if (editChoice == 2) {
+        // Пользователь выбирает конкретные трубы
+        cout << "Enter pipe IDs to edit (separated by spaces): ";
+        string input;
+        getline(cin, input);
+        
+        stringstream ss(input);
+        int id;
+        set<int> selectedIds;
+        
+        while (ss >> id) {
+            if (find(foundIds.begin(), foundIds.end(), id) != foundIds.end()) {
+                selectedIds.insert(id);
+            } else {
+                cout << "Pipe ID " << id << " not found in search results. Skipping.\n";
+            }
+        }
+        
+        if (selectedIds.empty()) {
+            cout << "No valid pipe IDs selected.\n";
+            return;
+        }
+        
+        pipesToEdit.assign(selectedIds.begin(), selectedIds.end());
+        cout << "Selected " << pipesToEdit.size() << " pipes for editing.\n";
+    }
+    
+    // Выбор действия для редактирования
+    cout << "\nChoose editing action:\n";
+    cout << "1. Mark as under repair\n";
+    cout << "2. Mark as operational\n";
+    cout << "3. Toggle repair status (swap current status)\n";
+    
+    int action = getValidatedNumber("Choose action: ", 1, 3);
+    
+    int changedCount = 0;
+    for (int id : pipesToEdit) {
+        int index = findPipeIndexById(id);
+        if (index != -1) {
+            Pipe& pipe = pipes[index];
+            bool oldStatus = pipe.underRepair;
+            
+            switch (action) {
+                case 1:
+                    pipe.underRepair = true;
+                    break;
+                case 2:
+                    pipe.underRepair = false;
+                    break;
+                case 3:
+                    pipe.underRepair = !pipe.underRepair;
+                    break;
+            }
+            
+            if (oldStatus != pipe.underRepair) {
+                changedCount++;
+            }
+        }
+    }
+    
+    cout << "Successfully updated repair status for " << changedCount << " pipes.\n";
+    
+    // Показать обновленные трубы
+    if (getConfirmation("Show updated pipes?")) {
+        displayPipesByIds(pipesToEdit);
+    }
 }
 
 void searchPipesMenu() {
@@ -708,8 +854,9 @@ int main() {
             << "7. Delete Station\n"
             << "8. Search Pipes\n"
             << "9. Search Stations\n"
-            << "10. Save Data\n"
-            << "11. Load Data\n"
+            << "10. Batch Edit Pipes\n"
+            << "11. Save Data\n"
+            << "12. Load Data\n"
             << "0. Exit\n"
             << "Choose action: ";
 
@@ -766,10 +913,14 @@ int main() {
             break;
 
         case 10:
-            saveData();
+            batchEditPipes();
             break;
 
         case 11:
+            saveData();
+            break;
+
+        case 12:
             loadData();
             break;
 
