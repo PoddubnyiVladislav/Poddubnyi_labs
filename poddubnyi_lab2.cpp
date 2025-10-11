@@ -8,11 +8,53 @@
 #include <unordered_set>
 #include <cctype>
 #include <set>
+#include <ctime>
 
 using namespace std;
 
 const string PIPE_IDENTIFIER = "[PIPE]";
 const string STATION_IDENTIFIER = "[STATION]";
+
+// Класс для логирования
+class Logger {
+private:
+    ofstream logFile;
+    string getCurrentTime() {
+        time_t now = time(0);
+        char timeStr[100];
+        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        return string(timeStr);
+    }
+
+public:
+    Logger() {
+        logFile.open("app_log.txt", ios::app);
+    }
+
+    ~Logger() {
+        if (logFile.is_open()) {
+            logFile.close();
+        }
+    }
+
+    void log(const string& action, const string& details = "") {
+        if (logFile.is_open()) {
+            logFile << "[" << getCurrentTime() << "] " << action;
+            if (!details.empty()) {
+                logFile << " - " << details;
+            }
+            logFile << endl;
+        }
+        // Также выводим в консоль для удобства отладки
+        cout << "[LOG] " << action;
+        if (!details.empty()) {
+            cout << " - " << details;
+        }
+        cout << endl;
+    }
+};
+
+Logger logger;
 
 struct Pipe {
     int id = 0;
@@ -20,6 +62,14 @@ struct Pipe {
     int length = 0;
     int diameter = 0;
     bool underRepair = false;
+    
+    void display() const {
+        cout << "ID: " << id
+             << " | Name: " << name
+             << " | Length: " << length << " km"
+             << " | Diameter: " << diameter << " mm"
+             << " | Under repair: " << (underRepair ? "Yes" : "No");
+    }
 };
 
 struct CompressorStation {
@@ -28,40 +78,284 @@ struct CompressorStation {
     unsigned int totalWorkshops = 0;
     unsigned int activeWorkshops = 0;
     int stationClass = 0;
+    
+    void display() const {
+        cout << "ID: " << id
+             << " | Name: " << name
+             << " | Workshops: " << activeWorkshops << "/" << totalWorkshops
+             << " | Class: " << stationClass;
+    }
+    
+    double getUnusedPercentage() const {
+        if (totalWorkshops == 0) return 0.0;
+        return (1.0 - (double)activeWorkshops / totalWorkshops) * 100.0;
+    }
 };
 
-vector<Pipe> pipes;
-vector<CompressorStation> stations;
-unordered_set<int> usedPipeIds;
-unordered_set<int> usedStationIds;
-int nextPipeId = 1;
-int nextStationId = 1;
+// Класс для управления данными
+class DataManager {
+private:
+    vector<Pipe> pipes;
+    vector<CompressorStation> stations;
+    unordered_set<int> usedPipeIds;
+    unordered_set<int> usedStationIds;
+    int nextPipeId = 1;
+    int nextStationId = 1;
 
-// Функция для преобразования строки к нижнему регистру (для поиска без учета регистра)
-string toLower(const string& str) {
-    string result = str;
-    transform(result.begin(), result.end(), result.begin(), ::tolower);
-    return result;
-}
-
-// Функция для генерации уникального ID
-int generateUniqueId(unordered_set<int>& usedIds, int& nextId) {
-    while (usedIds.find(nextId) != usedIds.end()) {
+    int generateUniqueId(unordered_set<int>& usedIds, int& nextId) {
+        while (usedIds.find(nextId) != usedIds.end()) {
+            nextId++;
+        }
+        int newId = nextId;
+        usedIds.insert(newId);
         nextId++;
+        return newId;
     }
-    int newId = nextId;
-    usedIds.insert(newId);
-    nextId++;
-    return newId;
-}
 
-// Функция для освобождения ID при удалении объекта
-void releaseId(unordered_set<int>& usedIds, int id) {
-    usedIds.erase(id);
-}
+    void releaseId(unordered_set<int>& usedIds, int id) {
+        usedIds.erase(id);
+    }
 
+public:
+    // Геттеры
+    const vector<Pipe>& getPipes() const { return pipes; }
+    const vector<CompressorStation>& getStations() const { return stations; }
+    bool hasPipes() const { return !pipes.empty(); }
+    bool hasStations() const { return !stations.empty(); }
+
+    // Работа с трубами
+    void addPipe(const Pipe& pipe) {
+        pipes.push_back(pipe);
+        logger.log("Pipe added", "ID: " + to_string(pipe.id) + ", Name: " + pipe.name);
+    }
+
+    void deletePipe(int id) {
+        auto it = find_if(pipes.begin(), pipes.end(), [id](const Pipe& p) { return p.id == id; });
+        if (it != pipes.end()) {
+            logger.log("Pipe deleted", "ID: " + to_string(id) + ", Name: " + it->name);
+            releaseId(usedPipeIds, id);
+            pipes.erase(it);
+        }
+    }
+
+    Pipe* getPipeById(int id) {
+        auto it = find_if(pipes.begin(), pipes.end(), [id](const Pipe& p) { return p.id == id; });
+        return it != pipes.end() ? &(*it) : nullptr;
+    }
+
+    vector<int> findPipesByName(const string& name) const {
+        vector<int> result;
+        string searchLower = toLower(name);
+        for (const auto& pipe : pipes) {
+            if (toLower(pipe.name).find(searchLower) != string::npos) {
+                result.push_back(pipe.id);
+            }
+        }
+        return result;
+    }
+
+    vector<int> findPipesByRepairStatus(bool status) const {
+        vector<int> result;
+        for (const auto& pipe : pipes) {
+            if (pipe.underRepair == status) {
+                result.push_back(pipe.id);
+            }
+        }
+        return result;
+    }
+
+    void batchUpdatePipes(const vector<int>& pipeIds, bool newStatus) {
+        for (int id : pipeIds) {
+            if (Pipe* pipe = getPipeById(id)) {
+                pipe->underRepair = newStatus;
+            }
+        }
+        logger.log("Batch pipe update", "Updated " + to_string(pipeIds.size()) + " pipes to status: " + (newStatus ? "under repair" : "operational"));
+    }
+
+    // Работа со станциями
+    void addStation(const CompressorStation& station) {
+        stations.push_back(station);
+        logger.log("Station added", "ID: " + to_string(station.id) + ", Name: " + station.name);
+    }
+
+    void deleteStation(int id) {
+        auto it = find_if(stations.begin(), stations.end(), [id](const CompressorStation& s) { return s.id == id; });
+        if (it != stations.end()) {
+            logger.log("Station deleted", "ID: " + to_string(id) + ", Name: " + it->name);
+            releaseId(usedStationIds, id);
+            stations.erase(it);
+        }
+    }
+
+    CompressorStation* getStationById(int id) {
+        auto it = find_if(stations.begin(), stations.end(), [id](const CompressorStation& s) { return s.id == id; });
+        return it != stations.end() ? &(*it) : nullptr;
+    }
+
+    vector<int> findStationsByName(const string& name) const {
+        vector<int> result;
+        string searchLower = toLower(name);
+        for (const auto& station : stations) {
+            if (toLower(station.name).find(searchLower) != string::npos) {
+                result.push_back(station.id);
+            }
+        }
+        return result;
+    }
+
+    vector<int> findStationsByUnusedPercentage(double minPercent, double maxPercent) const {
+        vector<int> result;
+        for (const auto& station : stations) {
+            double unusedPercent = station.getUnusedPercentage();
+            if (unusedPercent >= minPercent && unusedPercent <= maxPercent) {
+                result.push_back(station.id);
+            }
+        }
+        return result;
+    }
+
+    // Создание новых объектов с автоматической генерацией ID
+    Pipe createNewPipe() {
+        Pipe pipe;
+        pipe.id = generateUniqueId(usedPipeIds, nextPipeId);
+        return pipe;
+    }
+
+    CompressorStation createNewStation() {
+        CompressorStation station;
+        station.id = generateUniqueId(usedStationIds, nextStationId);
+        return station;
+    }
+
+    // Сохранение и загрузка
+    void saveToFile(const string& filename) {
+        ofstream outFile(filename);
+        if (!outFile) {
+            throw runtime_error("Could not create file " + filename);
+        }
+
+        outFile << "[NEXT_PIPE_ID]" << endl << nextPipeId << endl;
+        outFile << "[NEXT_STATION_ID]" << endl << nextStationId << endl;
+        
+        outFile << "[USED_PIPE_IDS]" << endl;
+        for (int id : usedPipeIds) outFile << id << " ";
+        outFile << endl;
+        
+        outFile << "[USED_STATION_IDS]" << endl;
+        for (int id : usedStationIds) outFile << id << " ";
+        outFile << endl;
+
+        for (const auto& pipe : pipes) {
+            outFile << PIPE_IDENTIFIER << endl;
+            outFile << pipe.id << endl;
+            outFile << pipe.name << endl;
+            outFile << pipe.length << endl;
+            outFile << pipe.diameter << endl;
+            outFile << pipe.underRepair << endl;
+        }
+
+        for (const auto& station : stations) {
+            outFile << STATION_IDENTIFIER << endl;
+            outFile << station.id << endl;
+            outFile << station.name << endl;
+            outFile << station.totalWorkshops << endl;
+            outFile << station.activeWorkshops << endl;
+            outFile << station.stationClass << endl;
+        }
+
+        outFile.close();
+        logger.log("Data saved", "File: " + filename + ", Pipes: " + to_string(pipes.size()) + ", Stations: " + to_string(stations.size()));
+    }
+
+    void loadFromFile(const string& filename) {
+        ifstream inFile(filename);
+        if (!inFile) {
+            throw runtime_error("Could not open file " + filename);
+        }
+
+        // Сохраняем старые данные для возможности отката
+        auto oldPipes = pipes;
+        auto oldStations = stations;
+        auto oldUsedPipeIds = usedPipeIds;
+        auto oldUsedStationIds = usedStationIds;
+        int oldNextPipeId = nextPipeId;
+        int oldNextStationId = nextStationId;
+
+        try {
+            pipes.clear();
+            stations.clear();
+            usedPipeIds.clear();
+            usedStationIds.clear();
+
+            string line;
+            while (getline(inFile, line)) {
+                if (line == "[NEXT_PIPE_ID]") {
+                    getline(inFile, line);
+                    nextPipeId = stoi(line);
+                }
+                else if (line == "[NEXT_STATION_ID]") {
+                    getline(inFile, line);
+                    nextStationId = stoi(line);
+                }
+                else if (line == "[USED_PIPE_IDS]") {
+                    getline(inFile, line);
+                    stringstream ss(line);
+                    int id;
+                    while (ss >> id) usedPipeIds.insert(id);
+                }
+                else if (line == "[USED_STATION_IDS]") {
+                    getline(inFile, line);
+                    stringstream ss(line);
+                    int id;
+                    while (ss >> id) usedStationIds.insert(id);
+                }
+                else if (line == PIPE_IDENTIFIER) {
+                    Pipe pipe;
+                    getline(inFile, line); pipe.id = stoi(line);
+                    getline(inFile, pipe.name);
+                    getline(inFile, line); pipe.length = stoi(line);
+                    getline(inFile, line); pipe.diameter = stoi(line);
+                    getline(inFile, line); pipe.underRepair = (line == "1");
+                    pipes.push_back(pipe);
+                }
+                else if (line == STATION_IDENTIFIER) {
+                    CompressorStation station;
+                    getline(inFile, line); station.id = stoi(line);
+                    getline(inFile, station.name);
+                    getline(inFile, line); station.totalWorkshops = stoul(line);
+                    getline(inFile, line); station.activeWorkshops = stoul(line);
+                    getline(inFile, line); station.stationClass = stoi(line);
+                    stations.push_back(station);
+                }
+            }
+            inFile.close();
+            logger.log("Data loaded", "File: " + filename + ", Pipes: " + to_string(pipes.size()) + ", Stations: " + to_string(stations.size()));
+        }
+        catch (const exception& e) {
+            // Восстанавливаем старые данные при ошибке
+            pipes = oldPipes;
+            stations = oldStations;
+            usedPipeIds = oldUsedPipeIds;
+            usedStationIds = oldUsedStationIds;
+            nextPipeId = oldNextPipeId;
+            nextStationId = oldNextStationId;
+            inFile.close();
+            throw runtime_error("Error loading file: " + string(e.what()));
+        }
+    }
+
+private:
+    string toLower(const string& str) const {
+        string result = str;
+        transform(result.begin(), result.end(), result.begin(), ::tolower);
+        return result;
+    }
+};
+
+// Функции для ввода данных
 template<typename T>
-T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_limits<T>::max()) {
+T getValidatedInput(const string& prompt, T minValue = numeric_limits<T>::lowest(), T maxValue = numeric_limits<T>::max()) {
     string input;
     T value;
 
@@ -70,54 +364,12 @@ T getValidatedNumber(const string& prompt, T minValue = 1, T maxValue = numeric_
         getline(cin, input);
 
         stringstream ss(input);
-
-        if (ss >> value) {
-            char remaining;
-            if (ss >> remaining) {
-                cout << "Invalid input! Please enter only a number without extra characters.\n";
-                continue;
+        if (ss >> value && !(ss >> input)) { // Проверяем что ввод полностью корректен
+            if (value >= minValue && value <= maxValue) {
+                return value;
             }
-
-            if (value < minValue || value > maxValue) {
-                cout << "Invalid input! Please enter a number between " << minValue << " and " << maxValue << ".\n";
-                continue;
-            }
-
-            return value;
         }
-        else {
-            cout << "Invalid input! Please enter a valid number.\n";
-        }
-    }
-}
-
-double getValidatedDouble(const string& prompt, double minValue = 0.0, double maxValue = 100.0) {
-    string input;
-    double value;
-
-    while (true) {
-        cout << prompt;
-        getline(cin, input);
-
-        stringstream ss(input);
-
-        if (ss >> value) {
-            char remaining;
-            if (ss >> remaining) {
-                cout << "Invalid input! Please enter only a number without extra characters.\n";
-                continue;
-            }
-
-            if (value < minValue || value > maxValue) {
-                cout << "Invalid input! Please enter a number between " << minValue << " and " << maxValue << ".\n";
-                continue;
-            }
-
-            return value;
-        }
-        else {
-            cout << "Invalid input! Please enter a valid number.\n";
-        }
+        cout << "Invalid input! Please enter a valid number between " << minValue << " and " << maxValue << ".\n";
     }
 }
 
@@ -127,811 +379,433 @@ bool getConfirmation(const string& message) {
         cout << message << " (y/n): ";
         getline(cin, input);
 
-        if (input == "y" || input == "Y") {
-            return true;
-        }
-        else if (input == "n" || input == "N") {
-            return false;
-        }
-        else {
-            cout << "Invalid input! Please enter 'y' or 'n'.\n";
-        }
+        if (input == "y" || input == "Y") return true;
+        if (input == "n" || input == "N") return false;
+        cout << "Invalid input! Please enter 'y' or 'n'.\n";
     }
 }
 
-int findPipeIndexById(int id) {
-    for (size_t i = 0; i < pipes.size(); ++i) {
-        if (pipes[i].id == id) {
-            return i;
-        }
-    }
-    return -1;
+string getFilename() {
+    string filename;
+    cout << "Enter filename: ";
+    getline(cin, filename);
+    return filename;
 }
 
-int findStationIndexById(int id) {
-    for (size_t i = 0; i < stations.size(); ++i) {
-        if (stations[i].id == id) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-void displayAllPipes() {
+// Функции для отображения
+void displayPipes(const vector<Pipe>& pipes) {
     if (pipes.empty()) {
         cout << "No pipes available.\n";
         return;
     }
-
-    cout << "\n=== ALL PIPES ===\n";
+    cout << "\n=== PIPES ===\n";
     for (const auto& pipe : pipes) {
-        cout << "ID: " << pipe.id
-            << " | Name: " << pipe.name
-            << " | Length: " << pipe.length << " km"
-            << " | Diameter: " << pipe.diameter << " mm"
-            << " | Under repair: " << (pipe.underRepair ? "Yes" : "No") << "\n";
+        pipe.display();
+        cout << "\n";
     }
 }
 
-void displayAllStations() {
+void displayStations(const vector<CompressorStation>& stations) {
     if (stations.empty()) {
         cout << "No stations available.\n";
         return;
     }
-
-    cout << "\n=== ALL COMPRESSOR STATIONS ===\n";
+    cout << "\n=== COMPRESSOR STATIONS ===\n";
     for (const auto& station : stations) {
-        cout << "ID: " << station.id
-            << " | Name: " << station.name
-            << " | Workshops: " << station.activeWorkshops << "/" << station.totalWorkshops
-            << " | Class: " << station.stationClass << "\n";
+        station.display();
+        cout << " | Unused: " << station.getUnusedPercentage() << "%\n";
     }
 }
 
-// Функции поиска труб
-vector<int> findPipesByName(const string& searchName) {
-    vector<int> foundIds;
-    string searchNameLower = toLower(searchName);
+void displayObjectsByIds(const DataManager& dm, const vector<int>& pipeIds, const vector<int>& stationIds) {
+    cout << "\n=== SELECTED OBJECTS ===\n";
     
-    for (const auto& pipe : pipes) {
-        if (toLower(pipe.name).find(searchNameLower) != string::npos) {
-            foundIds.push_back(pipe.id);
+    if (!pipeIds.empty()) {
+        cout << "Pipes:\n";
+        for (int id : pipeIds) {
+            if (const Pipe* pipe = dm.getPipeById(id)) {
+                cout << "  "; pipe->display(); cout << "\n";
+            }
         }
     }
     
-    return foundIds;
-}
-
-vector<int> findPipesByRepairStatus(bool status) {
-    vector<int> foundIds;
-    
-    for (const auto& pipe : pipes) {
-        if (pipe.underRepair == status) {
-            foundIds.push_back(pipe.id);
+    if (!stationIds.empty()) {
+        cout << "Stations:\n";
+        for (int id : stationIds) {
+            if (const CompressorStation* station = dm.getStationById(id)) {
+                cout << "  "; station->display(); cout << " | Unused: " << station->getUnusedPercentage() << "%\n";
+            }
         }
     }
-    
-    return foundIds;
 }
 
-void displayPipesByIds(const vector<int>& pipeIds) {
-    if (pipeIds.empty()) {
-        cout << "No pipes to display.\n";
-        return;
+// Функции для пакетных операций
+vector<int> selectPipesForBatchOperation(DataManager& dm) {
+    if (!dm.hasPipes()) {
+        cout << "No pipes available!\n";
+        return {};
     }
 
-    cout << "\n=== FOUND PIPES ===\n";
-    for (int id : pipeIds) {
-        int index = findPipeIndexById(id);
-        if (index != -1) {
-            const Pipe& pipe = pipes[index];
-            cout << "ID: " << pipe.id
-                << " | Name: " << pipe.name
-                << " | Length: " << pipe.length << " km"
-                << " | Diameter: " << pipe.diameter << " mm"
-                << " | Under repair: " << (pipe.underRepair ? "Yes" : "No") << "\n";
-        }
-    }
-    cout << "Total found: " << pipeIds.size() << " pipe(s)\n";
-}
-
-void searchPipesByName() {
-    if (pipes.empty()) {
-        cout << "No pipes available to search!\n";
-        return;
-    }
-
-    string searchName;
-    cout << "Enter pipe name to search for: ";
-    getline(cin, searchName);
-    
-    vector<int> foundIds = findPipesByName(searchName);
-    
-    if (foundIds.empty()) {
-        cout << "No pipes found with name containing: " << searchName << "\n";
-        return;
-    }
-    
-    displayPipesByIds(foundIds);
-}
-
-void searchPipesByRepairStatus() {
-    if (pipes.empty()) {
-        cout << "No pipes available to search!\n";
-        return;
-    }
-
-    cout << "Search for pipes:\n";
-    cout << "1. Under repair\n";
-    cout << "2. Operational\n";
-    int choice = getValidatedNumber("Choose status: ", 1, 2);
-    
-    bool searchStatus = (choice == 1);
-    vector<int> foundIds = findPipesByRepairStatus(searchStatus);
-    
-    if (foundIds.empty()) {
-        cout << "No pipes found with the selected status.\n";
-        return;
-    }
-    
-    displayPipesByIds(foundIds);
-}
-
-// Функция для пакетного редактирования труб
-void batchEditPipes() {
-    if (pipes.empty()) {
-        cout << "No pipes available to edit!\n";
-        return;
-    }
-
-    cout << "\n=== BATCH PIPE EDITING ===\n";
+    cout << "\n=== BATCH PIPE SELECTION ===\n";
     cout << "1. Search by name\n";
     cout << "2. Search by repair status\n";
-    cout << "0. Back to main menu\n";
+    cout << "0. Cancel\n";
     
-    int choice = getValidatedNumber("Choose search type: ", 0, 2);
-    
+    int choice = getValidatedInput<int>("Choose search type: ", 0, 2);
+    if (choice == 0) return {};
+
     vector<int> foundIds;
-    
     switch (choice) {
         case 1: {
-            string searchName;
-            cout << "Enter pipe name to search for: ";
-            getline(cin, searchName);
-            foundIds = findPipesByName(searchName);
+            cout << "Enter pipe name to search: ";
+            string name;
+            getline(cin, name);
+            foundIds = dm.findPipesByName(name);
             break;
         }
         case 2: {
-            cout << "Search for pipes:\n";
-            cout << "1. Under repair\n";
-            cout << "2. Operational\n";
-            int statusChoice = getValidatedNumber("Choose status: ", 1, 2);
-            foundIds = findPipesByRepairStatus(statusChoice == 1);
+            cout << "Search for:\n1. Under repair\n2. Operational\n";
+            int statusChoice = getValidatedInput<int>("Choose status: ", 1, 2);
+            foundIds = dm.findPipesByRepairStatus(statusChoice == 1);
             break;
         }
-        case 0:
-            return;
     }
-    
+
     if (foundIds.empty()) {
-        cout << "No pipes found with the selected criteria.\n";
-        return;
+        cout << "No pipes found.\n";
+        return {};
     }
+
+    displayObjectsByIds(dm, foundIds, {});
+    cout << "\nFound " << foundIds.size() << " pipe(s)\n";
+
+    cout << "Selection mode:\n1. Select all\n2. Select specific pipes\n0. Cancel\n";
+    int selectMode = getValidatedInput<int>("Choose selection mode: ", 0, 2);
     
-    displayPipesByIds(foundIds);
+    if (selectMode == 0) return {};
+    if (selectMode == 1) return foundIds;
+
+    // Выбор конкретных труб
+    cout << "Enter pipe IDs to select (separated by spaces): ";
+    string input;
+    getline(cin, input);
     
-    cout << "\nBatch editing options:\n";
-    cout << "1. Edit all found pipes\n";
-    cout << "2. Select specific pipes to edit\n";
-    cout << "0. Cancel\n";
+    stringstream ss(input);
+    set<int> selectedIds;
+    int id;
     
-    int editChoice = getValidatedNumber("Choose editing mode: ", 0, 2);
-    
-    if (editChoice == 0) {
-        return;
-    }
-    
-    vector<int> pipesToEdit;
-    
-    if (editChoice == 1) {
-        // Редактируем все найденные трубы
-        pipesToEdit = foundIds;
-        cout << "Selected all " << foundIds.size() << " pipes for editing.\n";
-    } else if (editChoice == 2) {
-        // Пользователь выбирает конкретные трубы
-        cout << "Enter pipe IDs to edit (separated by spaces): ";
-        string input;
-        getline(cin, input);
-        
-        stringstream ss(input);
-        int id;
-        set<int> selectedIds;
-        
-        while (ss >> id) {
-            if (find(foundIds.begin(), foundIds.end(), id) != foundIds.end()) {
-                selectedIds.insert(id);
-            } else {
-                cout << "Pipe ID " << id << " not found in search results. Skipping.\n";
-            }
+    while (ss >> id) {
+        if (find(foundIds.begin(), foundIds.end(), id) != foundIds.end()) {
+            selectedIds.insert(id);
+        } else {
+            cout << "Pipe ID " << id << " not in search results. Skipping.\n";
         }
-        
-        if (selectedIds.empty()) {
-            cout << "No valid pipe IDs selected.\n";
-            return;
-        }
-        
-        pipesToEdit.assign(selectedIds.begin(), selectedIds.end());
-        cout << "Selected " << pipesToEdit.size() << " pipes for editing.\n";
     }
-    
-    // Выбор действия для редактирования
-    cout << "\nChoose editing action:\n";
+
+    return vector<int>(selectedIds.begin(), selectedIds.end());
+}
+
+void batchEditPipes(DataManager& dm) {
+    vector<int> selectedIds = selectPipesForBatchOperation(dm);
+    if (selectedIds.empty()) return;
+
+    cout << "\nBatch editing " << selectedIds.size() << " pipe(s)\n";
     cout << "1. Mark as under repair\n";
     cout << "2. Mark as operational\n";
-    cout << "3. Toggle repair status (swap current status)\n";
+    cout << "3. Toggle repair status\n";
+    cout << "0. Cancel\n";
     
-    int action = getValidatedNumber("Choose action: ", 1, 3);
-    
-    int changedCount = 0;
-    for (int id : pipesToEdit) {
-        int index = findPipeIndexById(id);
-        if (index != -1) {
-            Pipe& pipe = pipes[index];
-            bool oldStatus = pipe.underRepair;
-            
-            switch (action) {
-                case 1:
-                    pipe.underRepair = true;
-                    break;
-                case 2:
-                    pipe.underRepair = false;
-                    break;
-                case 3:
-                    pipe.underRepair = !pipe.underRepair;
-                    break;
-            }
-            
-            if (oldStatus != pipe.underRepair) {
-                changedCount++;
-            }
-        }
-    }
-    
-    cout << "Successfully updated repair status for " << changedCount << " pipes.\n";
-    
-    // Показать обновленные трубы
-    if (getConfirmation("Show updated pipes?")) {
-        displayPipesByIds(pipesToEdit);
-    }
-}
+    int action = getValidatedInput<int>("Choose action: ", 0, 3);
+    if (action == 0) return;
 
-void searchPipesMenu() {
-    if (pipes.empty()) {
-        cout << "No pipes available to search!\n";
-        return;
-    }
-
-    cout << "\n=== PIPE SEARCH ===\n";
-    cout << "1. Search by name\n";
-    cout << "2. Search by repair status\n";
-    cout << "0. Back to main menu\n";
-    
-    int choice = getValidatedNumber("Choose search type: ", 0, 2);
-    
-    switch (choice) {
-        case 1:
-            searchPipesByName();
-            break;
-        case 2:
-            searchPipesByRepairStatus();
-            break;
-        case 0:
+    bool newStatus;
+    switch (action) {
+        case 1: newStatus = true; break;
+        case 2: newStatus = false; break;
+        case 3: 
+            // Для toggle нужно обрабатывать каждую трубу отдельно
+            for (int id : selectedIds) {
+                if (Pipe* pipe = dm.getPipeById(id)) {
+                    pipe->underRepair = !pipe->underRepair;
+                }
+            }
+            logger.log("Batch pipe toggle", "Toggled " + to_string(selectedIds.size()) + " pipes");
+            cout << "Toggled repair status for " << selectedIds.size() << " pipes\n";
             return;
     }
+
+    dm.batchUpdatePipes(selectedIds, newStatus);
+    cout << "Updated " << selectedIds.size() << " pipes to " << (newStatus ? "under repair" : "operational") << "\n";
 }
 
-// Функции поиска КС
-void searchStationsByName() {
-    if (stations.empty()) {
-        cout << "No stations available to search!\n";
-        return;
-    }
+void batchDeletePipes(DataManager& dm) {
+    vector<int> selectedIds = selectPipesForBatchOperation(dm);
+    if (selectedIds.empty()) return;
 
-    string searchName;
-    cout << "Enter station name to search for: ";
-    getline(cin, searchName);
+    cout << "You are about to delete " << selectedIds.size() << " pipe(s)\n";
+    displayObjectsByIds(dm, selectedIds, {});
     
-    string searchNameLower = toLower(searchName);
-    vector<CompressorStation> foundStations;
-    
-    for (const auto& station : stations) {
-        if (toLower(station.name).find(searchNameLower) != string::npos) {
-            foundStations.push_back(station);
+    if (getConfirmation("Are you sure you want to delete these pipes?")) {
+        for (int id : selectedIds) {
+            dm.deletePipe(id);
         }
-    }
-    
-    if (foundStations.empty()) {
-        cout << "No stations found with name containing: " << searchName << "\n";
-        return;
-    }
-    
-    cout << "\n=== FOUND STATIONS ===\n";
-    for (const auto& station : foundStations) {
-        double unusedPercentage = 0.0;
-        if (station.totalWorkshops > 0) {
-            unusedPercentage = (1.0 - (double)station.activeWorkshops / station.totalWorkshops) * 100.0;
-        }
-        
-        cout << "ID: " << station.id
-            << " | Name: " << station.name
-            << " | Workshops: " << station.activeWorkshops << "/" << station.totalWorkshops
-            << " | Unused: " << unusedPercentage << "%"
-            << " | Class: " << station.stationClass << "\n";
-    }
-    cout << "Total found: " << foundStations.size() << " station(s)\n";
-}
-
-void searchStationsByUnusedPercentage() {
-    if (stations.empty()) {
-        cout << "No stations available to search!\n";
-        return;
-    }
-
-    cout << "Search stations by percentage of unused workshops (0-100%)\n";
-    double minPercentage = getValidatedDouble("Enter minimum percentage: ", 0.0, 100.0);
-    double maxPercentage = getValidatedDouble("Enter maximum percentage: ", minPercentage, 100.0);
-    
-    vector<CompressorStation> foundStations;
-    
-    for (const auto& station : stations) {
-        if (station.totalWorkshops > 0) {
-            double unusedPercentage = (1.0 - (double)station.activeWorkshops / station.totalWorkshops) * 100.0;
-            if (unusedPercentage >= minPercentage && unusedPercentage <= maxPercentage) {
-                foundStations.push_back(station);
-            }
-        }
-    }
-    
-    if (foundStations.empty()) {
-        cout << "No stations found with unused workshops percentage between " 
-             << minPercentage << "% and " << maxPercentage << "%\n";
-        return;
-    }
-    
-    cout << "\n=== FOUND STATIONS ===\n";
-    for (const auto& station : foundStations) {
-        double unusedPercentage = (1.0 - (double)station.activeWorkshops / station.totalWorkshops) * 100.0;
-        
-        cout << "ID: " << station.id
-            << " | Name: " << station.name
-            << " | Workshops: " << station.activeWorkshops << "/" << station.totalWorkshops
-            << " | Unused: " << unusedPercentage << "%"
-            << " | Class: " << station.stationClass << "\n";
-    }
-    cout << "Total found: " << foundStations.size() << " station(s)\n";
-}
-
-void searchStationsMenu() {
-    if (stations.empty()) {
-        cout << "No stations available to search!\n";
-        return;
-    }
-
-    cout << "\n=== STATION SEARCH ===\n";
-    cout << "1. Search by name\n";
-    cout << "2. Search by percentage of unused workshops\n";
-    cout << "0. Back to main menu\n";
-    
-    int choice = getValidatedNumber("Choose search type: ", 0, 2);
-    
-    switch (choice) {
-        case 1:
-            searchStationsByName();
-            break;
-        case 2:
-            searchStationsByUnusedPercentage();
-            break;
-        case 0:
-            return;
+        cout << "Deleted " << selectedIds.size() << " pipe(s)\n";
     }
 }
 
-void addPipe() {
-    Pipe newPipe;
-    newPipe.id = generateUniqueId(usedPipeIds, nextPipeId);
-    
-    cout << "Enter pipe name: ";
-    getline(cin, newPipe.name);
-    newPipe.length = getValidatedNumber<int>("Enter length (km, must be positive): ", 1);
-    newPipe.diameter = getValidatedNumber<int>("Enter diameter (mm, must be positive): ", 1);
-    newPipe.underRepair = false;
-    
-    pipes.push_back(newPipe);
-    cout << "Pipe added successfully! (ID: " << newPipe.id << ")\n";
-}
-
-void addStation() {
-    CompressorStation newStation;
-    newStation.id = generateUniqueId(usedStationIds, nextStationId);
-    
-    cout << "Enter station name: ";
-    getline(cin, newStation.name);
-    newStation.totalWorkshops = getValidatedNumber<unsigned int>("Enter total workshops: ", 1);
-    newStation.activeWorkshops = getValidatedNumber<unsigned int>(
-        "Enter active workshops: ", 0, newStation.totalWorkshops);
-    newStation.stationClass = getValidatedNumber<int>("Enter station class: ", 1);
-    
-    stations.push_back(newStation);
-    cout << "Station added successfully! (ID: " << newStation.id << ")\n";
-}
-
-void editPipeStatus() {
-    if (pipes.empty()) {
-        cout << "No pipes available to edit!\n";
-        return;
-    }
-
-    displayAllPipes();
-    int pipeId = getValidatedNumber<int>("\nEnter pipe ID to edit: ");
-    
-    int pipeIndex = findPipeIndexById(pipeId);
-    if (pipeIndex == -1) {
-        cout << "Pipe with ID " << pipeId << " not found!\n";
-        return;
-    }
-
-    Pipe& pipe = pipes[pipeIndex];
-    cout << "Current repair status: " << (pipe.underRepair ? "Under repair" : "Operational") << endl;
-    
-    if (getConfirmation("Change repair status?")) {
-        pipe.underRepair = !pipe.underRepair;
-        cout << "Status changed successfully!\n";
-    }
-}
-
-void editStationWorkshops() {
-    if (stations.empty()) {
-        cout << "No stations available to edit!\n";
-        return;
-    }
-
-    displayAllStations();
-    int stationId = getValidatedNumber<int>("\nEnter station ID to edit: ");
-    
-    int stationIndex = findStationIndexById(stationId);
-    if (stationIndex == -1) {
-        cout << "Station with ID " << stationId << " not found!\n";
-        return;
-    }
-
-    CompressorStation& station = stations[stationIndex];
-    cout << "Current workshops: " << station.activeWorkshops << "/" << station.totalWorkshops << " active\n";
-    cout << "1. Start workshop\n2. Stop workshop\nChoose action: ";
-
-    int action = getValidatedNumber("", 1, 2);
-    unsigned int changeAmount = getValidatedNumber<unsigned int>("Enter number of workshops: ", 1);
-
-    if (action == 1) {
-        if (station.activeWorkshops + changeAmount <= station.totalWorkshops) {
-            station.activeWorkshops += changeAmount;
-            cout << changeAmount << " workshop(s) started\n";
-        }
-        else {
-            cout << "Cannot start more than " << station.totalWorkshops - station.activeWorkshops << " workshops\n";
-        }
-    }
-    else {
-        if (changeAmount <= station.activeWorkshops) {
-            station.activeWorkshops -= changeAmount;
-            cout << changeAmount << " workshop(s) stopped\n";
-        }
-        else {
-            cout << "Cannot stop more than " << station.activeWorkshops << " workshops\n";
-        }
-    }
-}
-
-void deletePipe() {
-    if (pipes.empty()) {
-        cout << "No pipes available to delete!\n";
-        return;
-    }
-
-    displayAllPipes();
-    int pipeId = getValidatedNumber<int>("\nEnter pipe ID to delete: ");
-    
-    int pipeIndex = findPipeIndexById(pipeId);
-    if (pipeIndex == -1) {
-        cout << "Pipe with ID " << pipeId << " not found!\n";
-        return;
-    }
-
-    cout << "You are about to delete pipe: " << pipes[pipeIndex].name << " (ID: " << pipeId << ")\n";
-    if (getConfirmation("Are you sure?")) {
-        releaseId(usedPipeIds, pipeId);
-        pipes.erase(pipes.begin() + pipeIndex);
-        cout << "Pipe deleted successfully!\n";
-    }
-}
-
-void deleteStation() {
-    if (stations.empty()) {
-        cout << "No stations available to delete!\n";
-        return;
-    }
-
-    displayAllStations();
-    int stationId = getValidatedNumber<int>("\nEnter station ID to delete: ");
-    
-    int stationIndex = findStationIndexById(stationId);
-    if (stationIndex == -1) {
-        cout << "Station with ID " << stationId << " not found!\n";
-        return;
-    }
-
-    cout << "You are about to delete station: " << stations[stationIndex].name << " (ID: " << stationId << ")\n";
-    if (getConfirmation("Are you sure?")) {
-        releaseId(usedStationIds, stationId);
-        stations.erase(stations.begin() + stationIndex);
-        cout << "Station deleted successfully!\n";
-    }
-}
-
-void saveData() {
-    string filename;
-    cout << "Enter filename to save (without extension): ";
-    getline(cin, filename);
-    filename += ".txt";
-
-    ifstream testFile(filename);
-    if (testFile.good()) {
-        testFile.close();
-        if (!getConfirmation("File already exists. Overwrite?")) {
-            cout << "Save cancelled.\n";
-            return;
-        }
-    }
-
-    ofstream outFile(filename);
-    if (!outFile) {
-        cout << "Error: Could not create file " << filename << endl;
-        return;
-    }
-
-    outFile << "[NEXT_PIPE_ID]" << endl << nextPipeId << endl;
-    outFile << "[NEXT_STATION_ID]" << endl << nextStationId << endl;
-    
-    outFile << "[USED_PIPE_IDS]" << endl;
-    for (int id : usedPipeIds) {
-        outFile << id << " ";
-    }
-    outFile << endl;
-    
-    outFile << "[USED_STATION_IDS]" << endl;
-    for (int id : usedStationIds) {
-        outFile << id << " ";
-    }
-    outFile << endl;
-
-    for (const auto& pipe : pipes) {
-        outFile << PIPE_IDENTIFIER << endl;
-        outFile << pipe.id << endl;
-        outFile << pipe.name << endl;
-        outFile << pipe.length << endl;
-        outFile << pipe.diameter << endl;
-        outFile << pipe.underRepair << endl;
-    }
-
-    for (const auto& station : stations) {
-        outFile << STATION_IDENTIFIER << endl;
-        outFile << station.id << endl;
-        outFile << station.name << endl;
-        outFile << station.totalWorkshops << endl;
-        outFile << station.activeWorkshops << endl;
-        outFile << station.stationClass << endl;
-    }
-
-    outFile.close();
-    cout << "Data successfully saved to " << filename << endl;
-    cout << "Saved: " << pipes.size() << " pipes, " << stations.size() << " stations\n";
-}
-
-void loadData() {
-    string filename;
-    cout << "Enter filename to load (without extension): ";
-    getline(cin, filename);
-    filename += ".txt";
-
-    ifstream inFile(filename);
-    if (!inFile) {
-        cout << "Error: Could not open file " << filename << endl;
-        return;
-    }
-
-    if (!pipes.empty() || !stations.empty()) {
-        if (!getConfirmation("Current data will be overwritten. Continue?")) {
-            cout << "Load cancelled.\n";
-            inFile.close();
-            return;
-        }
-    }
-
-    pipes.clear();
-    stations.clear();
-    usedPipeIds.clear();
-    usedStationIds.clear();
-    
-    string line;
-    bool readingUsedPipeIds = false;
-    bool readingUsedStationIds = false;
-
-    while (getline(inFile, line)) {
-        if (line == "[NEXT_PIPE_ID]") {
-            string idStr;
-            getline(inFile, idStr);
-            nextPipeId = stoi(idStr);
-        }
-        else if (line == "[NEXT_STATION_ID]") {
-            string idStr;
-            getline(inFile, idStr);
-            nextStationId = stoi(idStr);
-        }
-        else if (line == "[USED_PIPE_IDS]") {
-            string idsStr;
-            getline(inFile, idsStr);
-            stringstream ss(idsStr);
-            int id;
-            while (ss >> id) {
-                usedPipeIds.insert(id);
-            }
-        }
-        else if (line == "[USED_STATION_IDS]") {
-            string idsStr;
-            getline(inFile, idsStr);
-            stringstream ss(idsStr);
-            int id;
-            while (ss >> id) {
-                usedStationIds.insert(id);
-            }
-        }
-        else if (line == PIPE_IDENTIFIER) {
-            Pipe pipe;
-            string idStr, lengthStr, diameterStr, repairStr;
-            
-            getline(inFile, idStr);
-            getline(inFile, pipe.name);
-            getline(inFile, lengthStr);
-            getline(inFile, diameterStr);
-            getline(inFile, repairStr);
-
-            pipe.id = stoi(idStr);
-            pipe.length = stoi(lengthStr);
-            pipe.diameter = stoi(diameterStr);
-            pipe.underRepair = (repairStr == "1");
-            pipes.push_back(pipe);
-        }
-        else if (line == STATION_IDENTIFIER) {
-            CompressorStation station;
-            string idStr, totalStr, activeStr, classStr;
-            
-            getline(inFile, idStr);
-            getline(inFile, station.name);
-            getline(inFile, totalStr);
-            getline(inFile, activeStr);
-            getline(inFile, classStr);
-
-            station.id = stoi(idStr);
-            station.totalWorkshops = stoul(totalStr);
-            station.activeWorkshops = stoul(activeStr);
-            station.stationClass = stoi(classStr);
-            stations.push_back(station);
-        }
-    }
-
-    inFile.close();
-    cout << "Data successfully loaded from " << filename << endl;
-    cout << "Loaded: " << pipes.size() << " pipes, " << stations.size() << " stations\n";
-    cout << "Next available IDs - Pipe: " << nextPipeId << ", Station: " << nextStationId << endl;
-}
-
-void viewAllObjects() {
-    cout << "\n=== CURRENT STATE ===\n";
-    displayAllPipes();
-    displayAllStations();
+// Основное меню
+void showMainMenu() {
+    cout << "\n=== GAS NETWORK MANAGEMENT ===\n"
+         << "1. Add Pipe\n"
+         << "2. Add Compressor Station\n"
+         << "3. View All Objects\n"
+         << "4. Edit Pipe\n"
+         << "5. Edit Station\n"
+         << "6. Delete Pipe\n"
+         << "7. Delete Station\n"
+         << "8. Search Pipes\n"
+         << "9. Search Stations\n"
+         << "10. Batch Edit Pipes\n"
+         << "11. Batch Delete Pipes\n"
+         << "12. Save Data\n"
+         << "13. Load Data\n"
+         << "0. Exit\n"
+         << "Choose action: ";
 }
 
 int main() {
-    int choice = -1;
+    DataManager dm;
+    logger.log("Application started");
 
-    while (true) {
-        cout << "\nMain Menu:\n"
-            << "1. Add Pipe\n"
-            << "2. Add Compressor Station\n"
-            << "3. View All Objects\n"
-            << "4. Edit Pipe Status\n"
-            << "5. Edit Station Workshops\n"
-            << "6. Delete Pipe\n"
-            << "7. Delete Station\n"
-            << "8. Search Pipes\n"
-            << "9. Search Stations\n"
-            << "10. Batch Edit Pipes\n"
-            << "11. Save Data\n"
-            << "12. Load Data\n"
-            << "0. Exit\n"
-            << "Choose action: ";
+    try {
+        int choice = -1;
+        while (choice != 0) {
+            showMainMenu();
+            choice = getValidatedInput<int>("", 0, 13);
 
-        string input;
-        getline(cin, input);
-        stringstream ss(input);
+            try {
+                switch (choice) {
+                    case 1: {
+                        Pipe newPipe = dm.createNewPipe();
+                        cout << "Enter pipe name: ";
+                        getline(cin, newPipe.name);
+                        newPipe.length = getValidatedInput<int>("Enter length (km): ", 1);
+                        newPipe.diameter = getValidatedInput<int>("Enter diameter (mm): ", 1);
+                        newPipe.underRepair = false;
+                        dm.addPipe(newPipe);
+                        cout << "Pipe added successfully! (ID: " << newPipe.id << ")\n";
+                        break;
+                    }
 
-        if (!(ss >> choice)) {
-            cout << "Invalid input! Please enter a number.\n";
-            continue;
+                    case 2: {
+                        CompressorStation newStation = dm.createNewStation();
+                        cout << "Enter station name: ";
+                        getline(cin, newStation.name);
+                        newStation.totalWorkshops = getValidatedInput<unsigned int>("Enter total workshops: ", 1);
+                        newStation.activeWorkshops = getValidatedInput<unsigned int>(
+                            "Enter active workshops: ", 0, newStation.totalWorkshops);
+                        newStation.stationClass = getValidatedInput<int>("Enter station class: ", 1);
+                        dm.addStation(newStation);
+                        cout << "Station added successfully! (ID: " << newStation.id << ")\n";
+                        break;
+                    }
+
+                    case 3: {
+                        displayPipes(dm.getPipes());
+                        displayStations(dm.getStations());
+                        break;
+                    }
+
+                    case 4: {
+                        if (!dm.hasPipes()) {
+                            cout << "No pipes available!\n";
+                            break;
+                        }
+                        displayPipes(dm.getPipes());
+                        int id = getValidatedInput<int>("Enter pipe ID to edit: ");
+                        if (Pipe* pipe = dm.getPipeById(id)) {
+                            cout << "Current status: " << (pipe->underRepair ? "Under repair" : "Operational") << endl;
+                            if (getConfirmation("Change status?")) {
+                                pipe->underRepair = !pipe->underRepair;
+                                logger.log("Pipe status changed", "ID: " + to_string(id) + " to " + (pipe->underRepair ? "under repair" : "operational"));
+                                cout << "Status changed successfully!\n";
+                            }
+                        } else {
+                            cout << "Pipe not found!\n";
+                        }
+                        break;
+                    }
+
+                    case 5: {
+                        if (!dm.hasStations()) {
+                            cout << "No stations available!\n";
+                            break;
+                        }
+                        displayStations(dm.getStations());
+                        int id = getValidatedInput<int>("Enter station ID to edit: ");
+                        if (CompressorStation* station = dm.getStationById(id)) {
+                            cout << "Current workshops: " << station->activeWorkshops << "/" << station->totalWorkshops << endl;
+                            cout << "1. Start workshop\n2. Stop workshop\n";
+                            int action = getValidatedInput<int>("Choose action: ", 1, 2);
+                            unsigned int count = getValidatedInput<unsigned int>("Enter number of workshops: ", 1);
+                            
+                            if (action == 1) {
+                                if (station->activeWorkshops + count <= station->totalWorkshops) {
+                                    station->activeWorkshops += count;
+                                    logger.log("Station workshops started", "ID: " + to_string(id) + ", count: " + to_string(count));
+                                    cout << count << " workshop(s) started\n";
+                                } else {
+                                    cout << "Cannot start more workshops!\n";
+                                }
+                            } else {
+                                if (count <= station->activeWorkshops) {
+                                    station->activeWorkshops -= count;
+                                    logger.log("Station workshops stopped", "ID: " + to_string(id) + ", count: " + to_string(count));
+                                    cout << count << " workshop(s) stopped\n";
+                                } else {
+                                    cout << "Cannot stop more workshops!\n";
+                                }
+                            }
+                        } else {
+                            cout << "Station not found!\n";
+                        }
+                        break;
+                    }
+
+                    case 6: {
+                        if (!dm.hasPipes()) {
+                            cout << "No pipes available!\n";
+                            break;
+                        }
+                        displayPipes(dm.getPipes());
+                        int id = getValidatedInput<int>("Enter pipe ID to delete: ");
+                        if (dm.getPipeById(id)) {
+                            if (getConfirmation("Are you sure you want to delete this pipe?")) {
+                                dm.deletePipe(id);
+                                cout << "Pipe deleted successfully!\n";
+                            }
+                        } else {
+                            cout << "Pipe not found!\n";
+                        }
+                        break;
+                    }
+
+                    case 7: {
+                        if (!dm.hasStations()) {
+                            cout << "No stations available!\n";
+                            break;
+                        }
+                        displayStations(dm.getStations());
+                        int id = getValidatedInput<int>("Enter station ID to delete: ");
+                        if (dm.getStationById(id)) {
+                            if (getConfirmation("Are you sure you want to delete this station?")) {
+                                dm.deleteStation(id);
+                                cout << "Station deleted successfully!\n";
+                            }
+                        } else {
+                            cout << "Station not found!\n";
+                        }
+                        break;
+                    }
+
+                    case 8: {
+                        if (!dm.hasPipes()) {
+                            cout << "No pipes available!\n";
+                            break;
+                        }
+                        cout << "Search pipes by:\n1. Name\n2. Repair status\n";
+                        int searchType = getValidatedInput<int>("Choose search type: ", 1, 2);
+                        vector<int> results;
+                        if (searchType == 1) {
+                            cout << "Enter name to search: ";
+                            string name;
+                            getline(cin, name);
+                            results = dm.findPipesByName(name);
+                        } else {
+                            cout << "Search for:\n1. Under repair\n2. Operational\n";
+                            int status = getValidatedInput<int>("Choose status: ", 1, 2);
+                            results = dm.findPipesByRepairStatus(status == 1);
+                        }
+                        displayObjectsByIds(dm, results, {});
+                        break;
+                    }
+
+                    case 9: {
+                        if (!dm.hasStations()) {
+                            cout << "No stations available!\n";
+                            break;
+                        }
+                        cout << "Search stations by:\n1. Name\n2. Unused percentage\n";
+                        int searchType = getValidatedInput<int>("Choose search type: ", 1, 2);
+                        vector<int> results;
+                        if (searchType == 1) {
+                            cout << "Enter name to search: ";
+                            string name;
+                            getline(cin, name);
+                            results = dm.findStationsByName(name);
+                        } else {
+                            double minPercent = getValidatedInput<double>("Enter minimum unused percentage (0-100): ", 0.0, 100.0);
+                            double maxPercent = getValidatedInput<double>("Enter maximum unused percentage: ", minPercent, 100.0);
+                            results = dm.findStationsByUnusedPercentage(minPercent, maxPercent);
+                        }
+                        displayObjectsByIds(dm, {}, results);
+                        break;
+                    }
+
+                    case 10:
+                        batchEditPipes(dm);
+                        break;
+
+                    case 11:
+                        batchDeletePipes(dm);
+                        break;
+
+                    case 12: {
+                        string filename = getFilename();
+                        ifstream testFile(filename);
+                        if (testFile.good()) {
+                            testFile.close();
+                            if (!getConfirmation("File exists. Overwrite?")) {
+                                break;
+                            }
+                        }
+                        dm.saveToFile(filename);
+                        cout << "Data saved successfully!\n";
+                        break;
+                    }
+
+                    case 13: {
+                        string filename = getFilename();
+                        ifstream testFile(filename);
+                        if (!testFile.good()) {
+                            cout << "File does not exist!\n";
+                            break;
+                        }
+                        testFile.close();
+                        if (dm.hasPipes() || dm.hasStations()) {
+                            if (!getConfirmation("Current data will be lost. Continue?")) {
+                                break;
+                            }
+                        }
+                        dm.loadFromFile(filename);
+                        cout << "Data loaded successfully!\n";
+                        break;
+                    }
+
+                    case 0:
+                        cout << "Exiting...\n";
+                        break;
+                }
+            } catch (const exception& e) {
+                cout << "Error: " << e.what() << endl;
+                logger.log("Error", e.what());
+            }
         }
-
-        char remaining;
-        if (ss >> remaining) {
-            cout << "Invalid input! Please enter only a number without extra characters.\n";
-            continue;
-        }
-
-        switch (choice) {
-        case 1:
-            addPipe();
-            break;
-
-        case 2:
-            addStation();
-            break;
-
-        case 3:
-            viewAllObjects();
-            break;
-
-        case 4:
-            editPipeStatus();
-            break;
-
-        case 5:
-            editStationWorkshops();
-            break;
-
-        case 6:
-            deletePipe();
-            break;
-
-        case 7:
-            deleteStation();
-            break;
-
-        case 8:
-            searchPipesMenu();
-            break;
-
-        case 9:
-            searchStationsMenu();
-            break;
-
-        case 10:
-            batchEditPipes();
-            break;
-
-        case 11:
-            saveData();
-            break;
-
-        case 12:
-            loadData();
-            break;
-
-        case 0:
-            cout << "Exiting program...\n";
-            return 0;
-
-        default:
-            cout << "Invalid choice! Try again.\n";
-        }
+    } catch (const exception& e) {
+        cout << "Fatal error: " << e.what() << endl;
+        logger.log("Fatal error", e.what());
     }
 
+    logger.log("Application closed");
     return 0;
 }
