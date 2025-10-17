@@ -116,6 +116,13 @@ private:
         usedIds.erase(id);
     }
 
+    // безопасная toLower
+    string toLower(const string& str) const {
+        string result = str;
+        transform(result.begin(), result.end(), result.begin(), [](unsigned char c){ return (char)tolower(c); });
+        return result;
+    }
+
 public:
     // Геттеры
     const vector<Pipe>& getPipes() const { return pipes; }
@@ -138,7 +145,13 @@ public:
         }
     }
 
+    // неконстантная версия
     Pipe* getPipeById(int id) {
+        auto it = find_if(pipes.begin(), pipes.end(), [id](const Pipe& p) { return p.id == id; });
+        return it != pipes.end() ? &(*it) : nullptr;
+    }
+    // константная версия (для вызова на const DataManager&)
+    const Pipe* getPipeById(int id) const {
         auto it = find_if(pipes.begin(), pipes.end(), [id](const Pipe& p) { return p.id == id; });
         return it != pipes.end() ? &(*it) : nullptr;
     }
@@ -189,6 +202,10 @@ public:
     }
 
     CompressorStation* getStationById(int id) {
+        auto it = find_if(stations.begin(), stations.end(), [id](const CompressorStation& s) { return s.id == id; });
+        return it != stations.end() ? &(*it) : nullptr;
+    }
+    const CompressorStation* getStationById(int id) const {
         auto it = find_if(stations.begin(), stations.end(), [id](const CompressorStation& s) { return s.id == id; });
         return it != stations.end() ? &(*it) : nullptr;
     }
@@ -252,7 +269,7 @@ public:
             outFile << pipe.name << endl;
             outFile << pipe.length << endl;
             outFile << pipe.diameter << endl;
-            outFile << pipe.underRepair << endl;
+            outFile << (pipe.underRepair ? 1 : 0) << endl;
         }
 
         for (const auto& station : stations) {
@@ -291,41 +308,41 @@ public:
             string line;
             while (getline(inFile, line)) {
                 if (line == "[NEXT_PIPE_ID]") {
-                    getline(inFile, line);
+                    if (!getline(inFile, line)) break;
                     nextPipeId = stoi(line);
                 }
                 else if (line == "[NEXT_STATION_ID]") {
-                    getline(inFile, line);
+                    if (!getline(inFile, line)) break;
                     nextStationId = stoi(line);
                 }
                 else if (line == "[USED_PIPE_IDS]") {
-                    getline(inFile, line);
+                    if (!getline(inFile, line)) break;
                     stringstream ss(line);
                     int id;
                     while (ss >> id) usedPipeIds.insert(id);
                 }
                 else if (line == "[USED_STATION_IDS]") {
-                    getline(inFile, line);
+                    if (!getline(inFile, line)) break;
                     stringstream ss(line);
                     int id;
                     while (ss >> id) usedStationIds.insert(id);
                 }
                 else if (line == PIPE_IDENTIFIER) {
                     Pipe pipe;
-                    getline(inFile, line); pipe.id = stoi(line);
-                    getline(inFile, pipe.name);
-                    getline(inFile, line); pipe.length = stoi(line);
-                    getline(inFile, line); pipe.diameter = stoi(line);
-                    getline(inFile, line); pipe.underRepair = (line == "1");
+                    if (!getline(inFile, line)) break; pipe.id = stoi(line);
+                    if (!getline(inFile, pipe.name)) break;
+                    if (!getline(inFile, line)) break; pipe.length = stoi(line);
+                    if (!getline(inFile, line)) break; pipe.diameter = stoi(line);
+                    if (!getline(inFile, line)) break; pipe.underRepair = (line == "1");
                     pipes.push_back(pipe);
                 }
                 else if (line == STATION_IDENTIFIER) {
                     CompressorStation station;
-                    getline(inFile, line); station.id = stoi(line);
-                    getline(inFile, station.name);
-                    getline(inFile, line); station.totalWorkshops = stoul(line);
-                    getline(inFile, line); station.activeWorkshops = stoul(line);
-                    getline(inFile, line); station.stationClass = stoi(line);
+                    if (!getline(inFile, line)) break; station.id = stoi(line);
+                    if (!getline(inFile, station.name)) break;
+                    if (!getline(inFile, line)) break; station.totalWorkshops = stoul(line);
+                    if (!getline(inFile, line)) break; station.activeWorkshops = stoul(line);
+                    if (!getline(inFile, line)) break; station.stationClass = stoi(line);
                     stations.push_back(station);
                 }
             }
@@ -344,13 +361,6 @@ public:
             throw runtime_error("Error loading file: " + string(e.what()));
         }
     }
-
-private:
-    string toLower(const string& str) const {
-        string result = str;
-        transform(result.begin(), result.end(), result.begin(), ::tolower);
-        return result;
-    }
 };
 
 // Функции для ввода данных
@@ -360,11 +370,12 @@ T getValidatedInput(const string& prompt, T minValue = numeric_limits<T>::lowest
     T value;
 
     while (true) {
-        cout << prompt;
+        if (!prompt.empty()) cout << prompt;
         getline(cin, input);
 
         stringstream ss(input);
-        if (ss >> value && !(ss >> input)) { // Проверяем что ввод полностью корректен
+        string extra;
+        if (ss >> value && !(ss >> extra)) { // Проверяем что ввод полностью корректен
             if (value >= minValue && value <= maxValue) {
                 return value;
             }
@@ -531,6 +542,8 @@ void batchEditPipes(DataManager& dm) {
             }
             logger.log("Batch pipe toggle", "Toggled " + to_string(selectedIds.size()) + " pipes");
             cout << "Toggled repair status for " << selectedIds.size() << " pipes\n";
+            return;
+        default:
             return;
     }
 
